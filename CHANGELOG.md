@@ -6,6 +6,7 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ### Added
 
+- Number formats: Number with thousands separators, Currency ($, €, £, ¥, ₹), Percent and Scientific with a chosen number of decimals, Time and Text, plus Increase/Decrease Decimal. Currency, times and grouped numbers are recognized as you type, formats stay on empty cells, and all formats are saved to `.xlsx` as Excel format codes
 - Insert and delete rows and columns (Edit menu and right-click on headers or cells). References in every sheet are adjusted the way Excel does it: ranges grow and shrink, references to deleted cells become `#REF!`, and column widths move with their columns
 - Renaming a sheet updates every formula that refers to it, and the rename can be undone
 
@@ -15,6 +16,7 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ### Fixed
 
+- Fixed-decimal display rounds like Excel (half away from zero, after rounding to 15 significant digits)
 - Install instructions for macOS 15 and later, where right-click → Open no longer bypasses Gatekeeper
 
 ## [0.1.0] - 2026-10-13

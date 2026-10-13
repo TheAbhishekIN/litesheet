@@ -1,6 +1,7 @@
 //! Excel import (via calamine: .xlsx, .xlsm, .xls, .ods) and .xlsx export
 //! (via rust_xlsxwriter).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
@@ -17,7 +18,7 @@ pub(super) fn load(path: &Path) -> Result<Book> {
         open_workbook_auto(path).with_context(|| format!("Couldn't open {}", path.display()))?;
     let mut sheets = Vec::new();
     for name in wb.sheet_names() {
-        let mut cells: std::collections::HashMap<Pos, Cell> = std::collections::HashMap::new();
+        let mut cells: HashMap<Pos, Cell> = HashMap::new();
         if let Ok(range) = wb.worksheet_range(&name) {
             let (r0, c0) = range.start().unwrap_or((0, 0));
             for (r, c, data) in range.used_cells() {
@@ -86,9 +87,7 @@ fn cell_from_data(d: &Data) -> Option<Cell> {
 
 pub(super) fn save(book: &Book, path: &Path) -> Result<()> {
     let mut wb = XlsxWorkbook::new();
-    let date_fmt = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_fmt = Format::new().set_num_format("yyyy-mm-dd hh:mm");
-    let pct_fmt = Format::new().set_num_format("0.00%");
+    let mut formats: HashMap<NumFmt, Format> = HashMap::new();
     for sheet in &book.sheets {
         let ws = wb.add_worksheet();
         ws.set_name(&sheet.name)?;
@@ -102,12 +101,11 @@ pub(super) fn save(book: &Book, path: &Path) -> Result<()> {
         for &pos in positions {
             let cell = &sheet.cells[&pos];
             let (r, c) = (pos.0, pos.1 as u16);
-            let format = match cell.fmt {
-                NumFmt::General => None,
-                NumFmt::Date => Some(&date_fmt),
-                NumFmt::DateTime => Some(&datetime_fmt),
-                NumFmt::Percent => Some(&pct_fmt),
-            };
+            let format = cell.fmt.excel_code().map(|code| {
+                &*formats
+                    .entry(cell.fmt)
+                    .or_insert_with(|| Format::new().set_num_format(code))
+            });
             if cell.is_formula() {
                 let result = sheet.display(pos);
                 let formula = Formula::new(&cell.raw).set_result(result);
@@ -121,9 +119,12 @@ pub(super) fn save(book: &Book, path: &Path) -> Result<()> {
                 (Value::Number(n), Some(f)) => ws.write_number_with_format(r, c, *n, f)?,
                 (Value::Number(n), None) => ws.write_number(r, c, *n)?,
                 (Value::Bool(b), _) => ws.write_boolean(r, c, *b)?,
-                (Value::Text(s), _) => ws.write_string(r, c, s)?,
+                (Value::Text(s), Some(f)) => ws.write_string_with_format(r, c, s, f)?,
+                (Value::Text(s), None) => ws.write_string(r, c, s)?,
                 (Value::Error(e), _) => ws.write_string(r, c, e)?,
-                (Value::Empty, _) => ws,
+                // A formatted empty cell keeps its format.
+                (Value::Empty, Some(f)) => ws.write_blank(r, c, f)?,
+                (Value::Empty, None) => ws,
             };
         }
     }

@@ -56,17 +56,25 @@ impl Sheet {
             None => String::new(),
             Some(c) if c.is_formula() => c.raw.clone(),
             Some(c) => match (c.fmt, self.value(pos)) {
-                (NumFmt::Date | NumFmt::DateTime | NumFmt::Percent, v @ Value::Number(_)) => {
-                    format_value(v, c.fmt)
-                }
+                (
+                    NumFmt::Date | NumFmt::DateTime | NumFmt::Time | NumFmt::Percent { .. },
+                    v @ Value::Number(_),
+                ) => format_value(v, c.fmt),
                 _ => c.raw.clone(),
             },
         }
     }
 
+    /// The used range counts cells with content, not ones that only carry a format.
     pub(crate) fn recompute_extent(&mut self) {
-        self.n_rows = self.cells.keys().map(|p| p.0 + 1).max().unwrap_or(0);
-        self.n_cols = self.cells.keys().map(|p| p.1 + 1).max().unwrap_or(0);
+        let used = || {
+            self.cells
+                .iter()
+                .filter(|(_, c)| !c.raw.is_empty())
+                .map(|(p, _)| *p)
+        };
+        self.n_rows = used().map(|p| p.0 + 1).max().unwrap_or(0);
+        self.n_cols = used().map(|p| p.1 + 1).max().unwrap_or(0);
     }
 }
 

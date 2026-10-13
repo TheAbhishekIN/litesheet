@@ -26,12 +26,20 @@ impl App {
             .collect()
     }
 
+    /// Clear contents, keeping number formats (like Excel's Delete key).
     pub(crate) fn clear_selection(&mut self) {
+        let s = self.sheet();
         let edits = self
             .sel_positions()
             .into_iter()
-            .filter(|p| self.sheet().cells.contains_key(p))
-            .map(|p| (self.active, p, None))
+            .filter_map(|p| {
+                let cell = s.cells.get(&p)?;
+                let kept = (cell.fmt != model::NumFmt::General).then(|| Cell {
+                    raw: String::new(),
+                    fmt: cell.fmt,
+                });
+                Some((self.active, p, kept))
+            })
             .collect();
         self.book.apply("Clear", edits);
         self.data_changed();
@@ -275,19 +283,50 @@ impl App {
         self.data_changed();
     }
 
+    /// Apply a number format to every selected cell, including empty ones.
     pub(crate) fn set_format(&mut self, fmt: model::NumFmt) {
+        let s = self.sheet();
         let edits = self
             .sel_positions()
             .into_iter()
             .filter_map(|p| {
-                let cell = self.sheet().cells.get(&p)?;
-                (cell.fmt != fmt).then(|| {
+                let cell = s.cells.get(&p).cloned().unwrap_or_else(|| Cell::new(""));
+                (cell.fmt != fmt).then_some((self.active, p, Some(Cell { fmt, ..cell })))
+            })
+            .collect();
+        self.book.apply("Format", edits);
+        self.data_changed();
+    }
+
+    /// Show one more (`delta > 0`) or one fewer decimal place in selected numbers.
+    pub(crate) fn adjust_decimals(&mut self, delta: i32) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter_map(|p| {
+                let cell = s.cells.get(&p)?;
+                let Value::Number(n) = s.value(p) else {
+                    return None;
+                };
+                if !cell.fmt.adjusts_decimals() {
+                    return None;
+                }
+                let current = cell.fmt.decimals().unwrap_or_else(|| {
+                    // General or automatic percent: count the decimals shown now.
+                    let shown = model::format_number(*n, cell.fmt);
+                    let digits = shown.trim_end_matches('%');
+                    digits.split_once('.').map_or(0, |(_, d)| d.len() as u8)
+                }) as i32;
+                let target = (current + delta).clamp(0, model::MAX_DECIMALS as i32) as u8;
+                let fmt = cell.fmt.with_decimals(target);
+                (fmt != cell.fmt).then(|| {
                     (
                         self.active,
                         p,
                         Some(Cell {
-                            raw: cell.raw.clone(),
                             fmt,
+                            ..cell.clone()
                         }),
                     )
                 })

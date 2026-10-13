@@ -1,5 +1,6 @@
 //! Workbook-level tests: engine integration, undo/redo and formatting.
 
+use super::cell::Currency;
 use super::*;
 #[test]
 fn engine_roundtrip() {
@@ -53,11 +54,14 @@ fn formatting() {
     assert_eq!(d, 45413.0);
     assert_eq!(format_value(&Value::Number(d), NumFmt::Date), "2024-05-01");
     assert_eq!(
-        format_value(&Value::Number(0.155), NumFmt::Percent),
+        format_value(&Value::Number(0.155), NumFmt::Percent { decimals: None }),
         "15.5%"
     );
     let c = interpret_input("15%", NumFmt::General).unwrap();
-    assert_eq!((c.raw.as_str(), c.fmt), ("0.15", NumFmt::Percent));
+    assert_eq!(
+        (c.raw.as_str(), c.fmt),
+        ("0.15", NumFmt::Percent { decimals: None })
+    );
 }
 
 #[test]
@@ -137,4 +141,134 @@ fn insert_and_delete_rows_and_columns() {
     b.delete_cols(0, 0, 1).unwrap();
     assert_eq!(b.sheets[0].cells[&(0, 0)].raw, "=#REF!*10");
     assert!(matches!(b.sheets[0].value((0, 0)), Value::Error(_)));
+}
+
+#[test]
+fn number_formats_display() {
+    let n = |v: f64, f: NumFmt| format_value(&Value::Number(v), f);
+    let number = |decimals, thousands| NumFmt::Number {
+        decimals,
+        thousands,
+    };
+    assert_eq!(n(1234.567, number(2, true)), "1,234.57");
+    assert_eq!(n(-1234567.0, number(0, true)), "-1,234,567");
+    assert_eq!(n(-0.001, number(2, false)), "0.00");
+    assert_eq!(n(0.5, number(0, false)), "1");
+    assert_eq!(n(2.5, number(0, false)), "3");
+    assert_eq!(n(1.005, number(2, false)), "1.01");
+    assert_eq!(n(-1.005, number(2, false)), "-1.01");
+    let cur = |symbol| NumFmt::Currency {
+        decimals: 2,
+        symbol,
+    };
+    assert_eq!(n(1250.5, cur(Currency::Dollar)), "$1,250.50");
+    assert_eq!(n(-12.0, cur(Currency::Euro)), "-€12.00");
+    assert_eq!(n(99999.999, cur(Currency::Rupee)), "₹100,000.00");
+    assert_eq!(n(0.1234, NumFmt::Percent { decimals: Some(1) }), "12.3%");
+    assert_eq!(n(0.155, NumFmt::Percent { decimals: None }), "15.5%");
+    assert_eq!(n(12345.0, NumFmt::Scientific { decimals: 2 }), "1.23E+04");
+    assert_eq!(n(0.000123, NumFmt::Scientific { decimals: 1 }), "1.2E-04");
+    assert_eq!(n(99999.0, NumFmt::Scientific { decimals: 2 }), "1.00E+05");
+    assert_eq!(n(0.0, NumFmt::Scientific { decimals: 2 }), "0.00E+00");
+    assert_eq!(n(0.5 + 1.0 / 86400.0, NumFmt::Time), "12:00:01");
+    assert_eq!(n(45413.75, NumFmt::Time), "18:00:00");
+}
+
+#[test]
+fn typing_recognises_formats() {
+    let i = |s: &str, prev| interpret_input(s, prev).map(|c| (c.raw, c.fmt));
+    let g = NumFmt::General;
+    assert_eq!(
+        i("$1,250.50", g),
+        Some((
+            "1250.5".into(),
+            NumFmt::Currency {
+                decimals: 2,
+                symbol: Currency::Dollar
+            }
+        ))
+    );
+    assert_eq!(
+        i("-€12", g),
+        Some((
+            "-12".into(),
+            NumFmt::Currency {
+                decimals: 0,
+                symbol: Currency::Euro
+            }
+        ))
+    );
+    assert_eq!(
+        i("1,234", g),
+        Some((
+            "1234".into(),
+            NumFmt::Number {
+                decimals: 0,
+                thousands: true
+            }
+        ))
+    );
+    assert_eq!(i("1,23", g), Some(("1,23".into(), g))); // not a grouped number
+    assert_eq!(i("14:30", g), Some((fmt_number(14.5 / 24.0), NumFmt::Time)));
+    assert_eq!(
+        i("2:30 PM", g),
+        Some((fmt_number(14.5 / 24.0), NumFmt::Time))
+    );
+    assert_eq!(i("12:00 AM", g), Some(("0".into(), NumFmt::Time)));
+    assert_eq!(i("25:00", g), Some(("25:00".into(), g)));
+    // A plain number keeps the cell's format; in a percent cell it means percent.
+    let cur = NumFmt::Currency {
+        decimals: 2,
+        symbol: Currency::Pound,
+    };
+    assert_eq!(i("42", cur), Some(("42".into(), cur)));
+    let pct = NumFmt::Percent { decimals: Some(0) };
+    assert_eq!(i("15", pct), Some(("0.15".into(), pct)));
+    // Text cells keep exactly what was typed.
+    assert_eq!(
+        i("00042", NumFmt::Text),
+        Some(("00042".into(), NumFmt::Text))
+    );
+    assert_eq!(i("=1+1", NumFmt::Text), Some(("=1+1".into(), NumFmt::Text)));
+}
+
+#[test]
+fn text_and_formatted_empty_cells() {
+    let mut b = Book::new_blank();
+    let text = Cell {
+        raw: "00042".into(),
+        fmt: NumFmt::Text,
+    };
+    b.apply("t", vec![(0, (0, 0), Some(text))]);
+    assert_eq!(b.sheets[0].display((0, 0)), "00042");
+    assert!(matches!(b.sheets[0].value((0, 0)), Value::Text(_)));
+    let formula_text = Cell {
+        raw: "=1+1".into(),
+        fmt: NumFmt::Text,
+    };
+    b.apply("t", vec![(0, (1, 0), Some(formula_text))]);
+    assert_eq!(b.sheets[0].display((1, 0)), "=1+1");
+
+    // An empty cell can carry a format; typing a number there uses it.
+    let fmt = NumFmt::Currency {
+        decimals: 2,
+        symbol: Currency::Dollar,
+    };
+    b.apply(
+        "f",
+        vec![(
+            0,
+            (5, 5),
+            Some(Cell {
+                raw: String::new(),
+                fmt,
+            }),
+        )],
+    );
+    assert_eq!(
+        b.sheets[0].n_rows, 2,
+        "formatted empty cells aren't part of the used range"
+    );
+    b.set_input(0, (5, 5), "7");
+    assert_eq!(b.sheets[0].display((5, 5)), "$7.00");
 }

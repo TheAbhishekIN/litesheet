@@ -38,6 +38,7 @@ serde_json = "1.0.154"
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.release]
 lto = "thin"
