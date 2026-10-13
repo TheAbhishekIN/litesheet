@@ -40,10 +40,12 @@ pub(crate) struct ClipData {
     pub(crate) cut: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Pending {
     New,
     Open,
+    /// Open this file (from Finder or a drop), once unsaved changes are dealt with.
+    OpenFile(PathBuf),
     Close,
 }
 
@@ -99,6 +101,7 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> Self {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = true);
+        crate::platform::set_repaint_context(&cc.egui_ctx);
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -330,17 +333,23 @@ impl eframe::App for App {
             self.commit_edit((0, 0));
             self.pending = Some(Pending::Close);
         }
-        if let Some(files) =
-            ctx.input(|i| (!i.raw.dropped_files.is_empty()).then(|| i.raw.dropped_files.clone()))
-            && let Some(path) = files
-                .first()
+        // Files dropped on the window or opened from Finder.
+        let dropped = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
                 .map(|f| f.path().to_path_buf())
                 .filter(|p| !p.as_os_str().is_empty())
-        {
-            if self.book.dirty {
-                self.error("Save or discard your changes before opening another file");
-            } else {
-                self.start_load(path, &ctx);
+                .collect::<Vec<_>>()
+        });
+        let mut incoming = crate::platform::take_opened_files();
+        incoming.extend(dropped);
+        if let Some(path) = incoming.first().cloned() {
+            if incoming.len() > 1 {
+                self.notify("LiteSheet opens one workbook at a time; opening the first");
+            }
+            if self.loading.is_none() {
+                self.request(Pending::OpenFile(path), &ctx);
             }
         }
 
