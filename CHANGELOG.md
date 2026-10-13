@@ -4,13 +4,17 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Install instructions for macOS 15 and later, where right-click → Open no longer bypasses Gatekeeper
+- Renaming a sheet updates every formula that refers to it, and the rename can be undone
 
 ### Changed
 
 - Release builds are signed with a Developer ID and notarized when the Apple signing secrets are configured
+
+### Fixed
+
+- Install instructions for macOS 15 and later, where right-click → Open no longer bypasses Gatekeeper
 
 ## [0.1.0] - 2026-10-13
 

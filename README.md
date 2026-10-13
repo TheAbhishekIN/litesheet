@@ -224,7 +224,7 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 
 - [ ] Insert and delete rows and columns
 - [ ] Cell styling (bold, colours, borders, alignment); styles in imported files are currently dropped on save
-- [ ] Rewrite formulas when a sheet is renamed
+- [x] Rewrite formulas when a sheet is renamed
 - [ ] Open files from Finder (double-click, *Open With*)
 - [ ] Freeze panes, merged cells, more number formats
 - [ ] Charts

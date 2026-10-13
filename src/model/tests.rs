@@ -59,3 +59,31 @@ fn formatting() {
     let c = interpret_input("15%", NumFmt::General).unwrap();
     assert_eq!((c.raw.as_str(), c.fmt), ("0.15", NumFmt::Percent));
 }
+
+#[test]
+fn rename_sheet_updates_formulas_and_undoes() {
+    let mut b = Book::new_blank();
+    let data = b.add_sheet("Data");
+    b.set_input(data, (0, 0), "7");
+    b.set_input(0, (0, 0), "=Data!A1*3");
+    b.set_input(data, (1, 0), "=SUM(Data!A1:A1)+1");
+    b.rename_sheet(data, "My Inputs").unwrap();
+    assert_eq!(b.sheets[0].cells[&(0, 0)].raw, "='My Inputs'!A1*3");
+    assert_eq!(b.sheets[0].display((0, 0)), "21");
+    assert_eq!(
+        b.sheets[data].cells[&(1, 0)].raw,
+        "=SUM('My Inputs'!A1:A1)+1"
+    );
+    assert_eq!(b.undo_label(), Some("Rename sheet"));
+
+    b.undo();
+    assert_eq!(b.sheets[data].name, "Data");
+    assert_eq!(b.sheets[0].cells[&(0, 0)].raw, "=Data!A1*3");
+    assert_eq!(b.sheets[0].display((0, 0)), "21");
+
+    b.redo();
+    assert_eq!(b.sheets[data].name, "My Inputs");
+    assert_eq!(b.sheets[0].display((0, 0)), "21");
+    b.set_input(data, (0, 0), "10");
+    assert_eq!(b.sheets[0].display((0, 0)), "30");
+}

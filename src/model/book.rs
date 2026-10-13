@@ -19,8 +19,20 @@ pub struct CellChange {
     pub new: Option<Cell>,
 }
 
+/// A change that isn't a cell edit but must be undone along with one.
+#[derive(Clone, Debug)]
+pub enum MetaChange {
+    RenameSheet {
+        sheet: usize,
+        old: String,
+        new: String,
+    },
+}
+
 struct HistoryEntry {
     label: String,
+    /// Applied before `changes` when redoing, after them when undoing.
+    meta: Vec<MetaChange>,
     changes: Vec<CellChange>,
 }
 
@@ -126,12 +138,35 @@ impl Book {
             return Err(format!("A sheet named \"{new_name}\" already exists"));
         }
         let old = self.sheets[idx].name.clone();
-        self.engine
-            .rename_sheet(&old, new_name)
-            .map_err(|e| e.to_string())?;
-        self.sheets[idx].name = new_name.to_string();
-        self.dirty = true;
-        self.recalc();
+        if old == new_name {
+            return Ok(());
+        }
+        let rename = MetaChange::RenameSheet {
+            sheet: idx,
+            old: old.clone(),
+            new: new_name.to_string(),
+        };
+        self.apply_meta(&rename, false)?;
+
+        // Point formulas in every sheet at the new name.
+        let mut edits = Vec::new();
+        for (si, sheet) in self.sheets.iter().enumerate() {
+            for &pos in &sheet.formulas {
+                let cell = &sheet.cells[&pos];
+                let raw = super::refs::rename_sheet_refs(&cell.raw, &old, new_name);
+                if raw != cell.raw {
+                    edits.push((
+                        si,
+                        pos,
+                        Some(Cell {
+                            raw,
+                            ..cell.clone()
+                        }),
+                    ));
+                }
+            }
+        }
+        self.commit("Rename sheet", edits, vec![rename]);
         Ok(())
     }
 
@@ -164,6 +199,17 @@ impl Book {
 
     /// Apply a batch of edits as one undoable action.
     pub fn apply(&mut self, label: &str, edits: Vec<(usize, Pos, Option<Cell>)>) {
+        self.commit(label, edits, Vec::new());
+    }
+
+    /// Write `edits` and record them, with `meta` changes that have already
+    /// been applied, as one undoable action.
+    fn commit(
+        &mut self,
+        label: &str,
+        edits: Vec<(usize, Pos, Option<Cell>)>,
+        meta: Vec<MetaChange>,
+    ) {
         let mut extents: HashMap<usize, Pos> = HashMap::new();
         for (sheet, pos, cell) in &edits {
             if cell.is_some() {
@@ -191,7 +237,7 @@ impl Book {
                 new,
             });
         }
-        if changes.is_empty() {
+        if changes.is_empty() && meta.is_empty() {
             return;
         }
         for s in touched {
@@ -202,6 +248,7 @@ impl Book {
         self.redo.clear();
         self.undo.push(HistoryEntry {
             label: label.to_string(),
+            meta,
             changes,
         });
         if self.undo.len() > MAX_UNDO {
@@ -244,6 +291,11 @@ impl Book {
     }
 
     fn replay(&mut self, entry: &HistoryEntry, backwards: bool) -> (usize, Vec<Pos>) {
+        if !backwards {
+            for m in &entry.meta {
+                let _ = self.apply_meta(m, false);
+            }
+        }
         let mut touched = HashSet::new();
         let iter: Box<dyn Iterator<Item = &CellChange>> = if backwards {
             Box::new(entry.changes.iter().rev())
@@ -259,13 +311,38 @@ impl Book {
             self.write_cell(ch.sheet, ch.pos, target);
             touched.insert(ch.sheet);
         }
+        if backwards {
+            for m in entry.meta.iter().rev() {
+                let _ = self.apply_meta(m, true);
+            }
+        }
         for s in touched {
             self.sheets[s].recompute_extent();
         }
         self.recalc();
         self.dirty = true;
-        let sheet = entry.changes.first().map(|c| c.sheet).unwrap_or(0);
+        let sheet = entry
+            .changes
+            .first()
+            .map(|c| c.sheet)
+            .or_else(|| entry.meta.first().map(MetaChange::sheet))
+            .unwrap_or(0);
         (sheet, entry.changes.iter().map(|c| c.pos).collect())
+    }
+
+    /// Apply (or, with `backwards`, revert) a non-cell change.
+    fn apply_meta(&mut self, change: &MetaChange, backwards: bool) -> Result<(), String> {
+        match change {
+            MetaChange::RenameSheet { sheet, old, new } => {
+                let (from, to) = if backwards { (new, old) } else { (old, new) };
+                self.engine
+                    .rename_sheet(from, to)
+                    .map_err(|e| e.to_string())?;
+                self.sheets[*sheet].name = to.clone();
+            }
+        }
+        self.dirty = true;
+        Ok(())
     }
 
     /// Write one cell into both our model and the engine. Does not recalc.
@@ -348,5 +425,14 @@ fn from_literal(lv: &LiteralValue) -> Value {
         LiteralValue::Empty => Value::Number(0.0),
         LiteralValue::Pending => Value::Empty,
         LiteralValue::Error(e) => Value::Error(e.kind.to_string()),
+    }
+}
+
+impl MetaChange {
+    /// The sheet this change belongs to.
+    pub fn sheet(&self) -> usize {
+        match self {
+            MetaChange::RenameSheet { sheet, .. } => *sheet,
+        }
     }
 }
