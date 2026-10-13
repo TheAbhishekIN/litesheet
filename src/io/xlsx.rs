@@ -74,9 +74,9 @@ pub(super) fn load(path: &Path) -> Result<Book> {
                     cell.raw = text.to_string();
                 }
             }
-            widths.push(f.col_widths);
+            widths.push((f.col_widths, f.merges));
         } else {
-            widths.push(Vec::new());
+            widths.push((Vec::new(), Vec::new()));
         }
         sheets.push((name, cells.into_iter().collect()));
     }
@@ -84,12 +84,13 @@ pub(super) fn load(path: &Path) -> Result<Book> {
         return Err(anyhow!("The workbook has no sheets"));
     }
     let mut book = Book::from_sheets(sheets);
-    for (sheet, widths) in book.sheets.iter_mut().zip(widths) {
+    for (sheet, (widths, merges)) in book.sheets.iter_mut().zip(widths) {
         for (col, chars) in widths {
             sheet
                 .col_widths
                 .insert(col, (chars as f32 * PX_PER_CHAR).round());
         }
+        sheet.merges = merges.into_iter().filter(|(a, b)| a != b).collect();
     }
     Ok(book)
 }
@@ -139,6 +140,18 @@ pub(super) fn save(book: &Book, path: &Path) -> Result<()> {
             if col <= u16::MAX as u32 {
                 ws.set_column_width(col as u16, (w / PX_PER_CHAR) as f64)?;
             }
+        }
+        // Merges first: merge_range writes the range as text, so the real
+        // top-left value (number, formula, …) is written over it below.
+        for &((r0, c0), (r1, c1)) in &sheet.merges {
+            if c1 > u16::MAX as u32 {
+                continue;
+            }
+            let tl = sheet.cells.get(&(r0, c0));
+            let format = tl
+                .map(|c| excel_format(c.fmt, &c.style))
+                .unwrap_or_default();
+            ws.merge_range(r0, c0 as u16, r1, c1 as u16, "", &format)?;
         }
         let mut positions: Vec<&Pos> = sheet.cells.keys().collect();
         positions.sort_unstable();

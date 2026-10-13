@@ -275,3 +275,43 @@ fn text_and_formatted_empty_cells() {
     b.set_input(0, (5, 5), "7");
     assert_eq!(b.sheets[0].display((5, 5)), "$7.00");
 }
+
+#[test]
+fn merge_unmerge_and_structure() {
+    let mut b = Book::new_blank();
+    b.set_input(0, (0, 0), "Title");
+    b.set_input(0, (0, 1), "lost");
+    b.set_input(0, (1, 0), "kept");
+    b.merge(0, ((0, 0), (0, 2)), true);
+    assert_eq!(b.sheets[0].merges, vec![((0, 0), (0, 2))]);
+    assert_eq!(b.sheets[0].display((0, 1)), "");
+    assert_eq!(b.sheets[0].cells[&(0, 0)].style.align, HAlign::Center);
+    assert_eq!(b.sheets[0].merge_at((0, 2)), Some(((0, 0), (0, 2))));
+    assert_eq!(b.sheets[0].merge_at((1, 0)), None);
+
+    // Undo brings back the merged-away value and removes the merge.
+    b.undo();
+    assert!(b.sheets[0].merges.is_empty());
+    assert_eq!(b.sheets[0].display((0, 1)), "lost");
+    b.redo();
+
+    // A new overlapping merge replaces the old one.
+    b.merge(0, ((0, 1), (1, 3)), false);
+    assert_eq!(b.sheets[0].merges, vec![((0, 1), (1, 3))]);
+    b.undo();
+
+    // Inserting a column inside the merge widens it; deleting rows moves it.
+    b.insert_cols(0, 1, 1).unwrap();
+    assert_eq!(b.sheets[0].merges, vec![((0, 0), (0, 3))]);
+    b.insert_rows(0, 0, 2).unwrap();
+    assert_eq!(b.sheets[0].merges, vec![((2, 0), (2, 3))]);
+    // Deleting all but one of its columns dissolves it.
+    b.delete_cols(0, 1, 3).unwrap();
+    assert!(b.sheets[0].merges.is_empty());
+    b.undo();
+    assert_eq!(b.sheets[0].merges, vec![((2, 0), (2, 3))]);
+
+    b.unmerge(0, ((2, 2), (2, 2)));
+    assert!(b.sheets[0].merges.is_empty());
+    assert_eq!(b.undo_label(), Some("Unmerge cells"));
+}

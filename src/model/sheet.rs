@@ -4,6 +4,17 @@ use std::collections::{HashMap, HashSet};
 
 use super::{Cell, NumFmt, Pos, Value, format_value, refs};
 
+/// A merged range: (top-left, bottom-right), inclusive.
+pub type Merge = (Pos, Pos);
+
+pub fn merge_contains(m: Merge, p: Pos) -> bool {
+    (m.0.0..=m.1.0).contains(&p.0) && (m.0.1..=m.1.1).contains(&p.1)
+}
+
+pub fn merges_overlap(a: Merge, b: Merge) -> bool {
+    a.0.0 <= b.1.0 && b.0.0 <= a.1.0 && a.0.1 <= b.1.1 && b.0.1 <= a.1.1
+}
+
 /// Width of a column that hasn't been resized, in points.
 pub const DEFAULT_COL_WIDTH: f32 = 100.0;
 
@@ -14,6 +25,8 @@ pub struct Sheet {
     pub values: HashMap<Pos, Value>,
     pub(crate) formulas: HashSet<Pos>,
     pub col_widths: HashMap<u32, f32>,
+    /// Merged ranges as (top-left, bottom-right), inclusive. Never overlapping.
+    pub merges: Vec<Merge>,
     /// Used extent: one past the last non-empty row/col.
     pub n_rows: u32,
     pub n_cols: u32,
@@ -27,6 +40,7 @@ impl Sheet {
             values: HashMap::new(),
             formulas: HashSet::new(),
             col_widths: HashMap::new(),
+            merges: Vec::new(),
             n_rows: 0,
             n_cols: 0,
         }
@@ -63,6 +77,14 @@ impl Sheet {
                 _ => c.raw.clone(),
             },
         }
+    }
+
+    /// The merged range containing `pos`, if any.
+    pub fn merge_at(&self, pos: Pos) -> Option<Merge> {
+        self.merges
+            .iter()
+            .copied()
+            .find(|&m| merge_contains(m, pos))
     }
 
     /// The used range counts cells with content, not ones that only carry a format.

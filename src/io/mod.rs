@@ -134,6 +134,9 @@ mod tests {
             ],
         );
         b.sheets[0].col_widths.insert(0, 180.0);
+        b.merge(0, ((0, 0), (0, 3)), false);
+        b.set_input(0, (7, 0), "=6*7");
+        b.merge(0, ((7, 0), (8, 1)), false);
         let path = dir.join("styles.xlsx");
         save(&b, 0, &path).unwrap();
 
@@ -147,6 +150,15 @@ mod tests {
         assert_eq!(s.display((3, 0)), "25.0%");
         assert_eq!(s.display((4, 0)), "12:00:00");
         assert_eq!(s.cells[&(5, 1)].style.fill, Some(Rgb(68, 114, 196)));
+        assert_eq!(s.merges.len(), 2);
+        assert!(s.merges.contains(&((0, 0), (0, 3))));
+        assert_eq!(s.display((0, 0)), "Title");
+        assert_eq!(
+            s.cells[&(7, 0)].raw,
+            "=6*7",
+            "the merged top-left keeps its formula"
+        );
+        assert_eq!(s.display((7, 0)), "42");
         let w = s.col_widths[&0];
         assert!((w - 180.0).abs() < 8.0, "width {w}");
         std::fs::remove_dir_all(&dir).ok();

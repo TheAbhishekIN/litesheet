@@ -284,6 +284,29 @@ impl App {
         ui.separator();
         item(ui, "Text", "00042", NumFmt::Text);
         ui.separator();
+        let single = self.sel.is_single();
+        if ui
+            .add_enabled(!single, egui::Button::new("Merge & Center"))
+            .clicked()
+        {
+            self.merge_selection(true);
+        }
+        if ui
+            .add_enabled(!single, egui::Button::new("Merge Cells"))
+            .clicked()
+        {
+            self.merge_selection(false);
+        }
+        if ui
+            .add_enabled(
+                self.selection_has_merge(),
+                egui::Button::new("Unmerge Cells"),
+            )
+            .clicked()
+        {
+            self.unmerge_selection();
+        }
+        ui.separator();
         if ui.button("Increase Decimal").clicked() {
             self.adjust_decimals(1);
         }

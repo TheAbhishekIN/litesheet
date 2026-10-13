@@ -313,3 +313,53 @@ fn cell_styles_from_toolbar_and_shortcuts() {
     h.state_mut().clear_formats();
     assert!(!h.state().sheet().cells.contains_key(&(0, 0)));
 }
+
+#[test]
+fn merge_cells_from_toolbar() {
+    let mut h = harness(SALES_CSV);
+    // Insert a title row, then merge it across A1:G1.
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    h.state_mut().insert_rows(false);
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    type_text(&mut h, "Sales orders");
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    click(&mut h, cell(0, 6), Modifiers::SHIFT);
+    h.get_by_label("Merge & Center").click();
+    h.run_steps(2);
+    assert_eq!(h.state().sheet().merges, vec![((0, 0), (0, 6))]);
+
+    // Clicking anywhere in the merge selects all of it, with A1 active.
+    click(&mut h, cell(0, 4), Modifiers::NONE);
+    assert_eq!(h.state().sel.cursor, (0, 0));
+    assert_eq!(h.state().sel.name(), "A1:G1");
+    assert!(h.state().sel_is_single_cell());
+    shot(&mut h, "merged");
+
+    // Arrows step over the merge; Up from below lands on its top-left.
+    key(&mut h, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(h.state().sel.cursor, (0, 7));
+    key(&mut h, Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(h.state().sel.cursor, (0, 0));
+    click(&mut h, cell(1, 3), Modifiers::NONE);
+    key(&mut h, Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(h.state().sel.cursor, (0, 0));
+
+    // Editing a merged cell edits its top-left.
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.state_mut().edit.as_mut().unwrap().buf = "Orders 2024".into();
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(display(&h, 0, 0), "Orders 2024");
+
+    // Sorting across merged rows is refused rather than scrambling data.
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    click(&mut h, cell(8, 0), Modifiers::SHIFT);
+    h.state_mut().sort_by(4, true);
+    assert_eq!(display(&h, 2, 0), "1001");
+
+    // The same button unmerges.
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    h.get_by_label("Merge & Center").click();
+    h.run_steps(2);
+    assert!(h.state().sheet().merges.is_empty());
+}

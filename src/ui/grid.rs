@@ -257,6 +257,7 @@ impl App {
                             self.point_at((r, c), false);
                         } else if self.edit.is_none() && self.sel.cursor != (r, c) {
                             self.sel.cursor = (r, c);
+                            self.snap_to_merges();
                         }
                     }
                     Hit::ColHeader(c) | Hit::FilterButton(c)
@@ -356,6 +357,7 @@ impl App {
         } else {
             self.sel = Selection::single(pos);
         }
+        self.snap_to_merges();
     }
 
     fn visible_range(&self, l: &Layout) -> (u32, u32, u32, u32) {
@@ -412,69 +414,88 @@ impl App {
         }
 
         let border_stroke = Stroke::new(1.0, v.strong_text_color());
+        // Paint one cell, or a merged range as one cell (`merged` covers the
+        // inner grid lines and highlights the whole range).
+        let paint_cell = |rect: Rect, pos: (u32, u32), merged: Option<crate::model::Merge>| {
+            let cell = sheet.cells.get(&pos);
+            let style = cell.map(|c| c.style).unwrap_or_default();
+            if merged.is_some() {
+                painter.rect_filled(rect.shrink(0.5), 0.0, bg);
+            }
+            if let Some(fill) = style.fill {
+                painter.rect_filled(rect, 0.0, rgb(fill));
+            }
+            let selected = match merged {
+                Some(m) => crate::model::merges_overlap(m, self.sel.range()),
+                None => self.sel.contains(pos),
+            };
+            if selected && !self.sel_is_single_cell() {
+                painter.rect_filled(rect, 0.0, sel_fill);
+            }
+            if has_search && Some(pos) == current {
+                painter.rect_filled(rect, 0.0, current_match_fill);
+            } else if has_search && view.matches.binary_search(&pos).is_ok() {
+                painter.rect_filled(rect, 0.0, match_fill);
+            }
+            if style.borders.any() {
+                paint_borders(&painter, rect, style.borders, border_stroke);
+            }
+            let value = sheet.value(pos);
+            if editing == Some(pos) || matches!(value, Value::Empty) {
+                return;
+            }
+            // Explicit colour, else readable on the fill, else the theme's.
+            let color = match (style.color, style.fill, value) {
+                (Some(c), _, _) => rgb(c),
+                (None, _, Value::Error(_)) => error,
+                (None, Some(fill), _) if fill.luminance() > 0.4 => Color32::from_gray(20),
+                (None, Some(_), _) => Color32::from_gray(240),
+                (None, None, _) => text,
+            };
+            let galley =
+                |s: String| ui.fonts_mut(|f| f.layout_job(text_job(s, &font, color, &style)));
+            let mut g = galley(sheet.display(pos));
+            // Numbers that don't fit show as ### like Excel.
+            if matches!(value, Value::Number(_)) && g.size().x > rect.width() - 6.0 {
+                g = galley("#".repeat(((rect.width() - 6.0) / 7.0).max(1.0) as usize));
+            }
+            let align = match (style.align, value) {
+                (HAlign::Left, _) => Align::Min,
+                (HAlign::Center, _) => Align::Center,
+                (HAlign::Right, _) => Align::Max,
+                (HAlign::General, Value::Number(_)) => Align::Max,
+                (HAlign::General, Value::Bool(_) | Value::Error(_)) => Align::Center,
+                (HAlign::General, _) => Align::Min,
+            };
+            let x = match align {
+                Align::Min => rect.left() + 4.0,
+                Align::Center => rect.center().x - g.size().x / 2.0,
+                Align::Max => rect.right() - 4.0 - g.size().x,
+            };
+            let at = pos2(x, rect.center().y - g.size().y / 2.0);
+            let clipped = painter.with_clip_rect(rect.shrink2(vec2(1.0, 0.0)).intersect(visible));
+            clipped.galley(at, g.clone(), color);
+            if style.bold {
+                // The bundled font has no bold weight: strike twice, slightly offset.
+                clipped.galley(at + vec2(0.55, 0.0), g, color);
+            }
+        };
+
+        let merges = self.visible_merges(l, first_vi, last_vi, first_c, last_c);
         for vi in first_vi..last_vi {
             let Some(r) = self.row_at(vi) else { continue };
             for c in first_c..last_c {
-                let rect = l.cell_rect(vi, c);
-                let pos = (r, c);
-                let cell = sheet.cells.get(&pos);
-                let style = cell.map(|c| c.style).unwrap_or_default();
-                if let Some(fill) = style.fill {
-                    painter.rect_filled(rect, 0.0, rgb(fill));
-                }
-                if self.sel.contains(pos) && !self.sel.is_single() {
-                    painter.rect_filled(rect, 0.0, sel_fill);
-                }
-                if has_search && Some(pos) == current {
-                    painter.rect_filled(rect, 0.0, current_match_fill);
-                } else if has_search && view.matches.binary_search(&pos).is_ok() {
-                    painter.rect_filled(rect, 0.0, match_fill);
-                }
-                if style.borders.any() {
-                    paint_borders(&painter, rect, style.borders, border_stroke);
-                }
-                let value = sheet.value(pos);
-                if editing == Some(pos) || matches!(value, Value::Empty) {
+                if merges
+                    .iter()
+                    .any(|(m, _)| crate::model::merge_contains(*m, (r, c)))
+                {
                     continue;
                 }
-                // Explicit colour, else readable on the fill, else the theme's.
-                let color = match (style.color, style.fill, value) {
-                    (Some(c), _, _) => rgb(c),
-                    (None, _, Value::Error(_)) => error,
-                    (None, Some(fill), _) if fill.luminance() > 0.4 => Color32::from_gray(20),
-                    (None, Some(_), _) => Color32::from_gray(240),
-                    (None, None, _) => text,
-                };
-                let shown = sheet.display(pos);
-                let galley =
-                    |s: String| ui.fonts_mut(|f| f.layout_job(text_job(s, &font, color, &style)));
-                let mut g = galley(shown);
-                // Numbers that don't fit show as ### like Excel.
-                if matches!(value, Value::Number(_)) && g.size().x > rect.width() - 6.0 {
-                    g = galley("#".repeat(((rect.width() - 6.0) / 7.0).max(1.0) as usize));
-                }
-                let align = match (style.align, value) {
-                    (HAlign::Left, _) => Align::Min,
-                    (HAlign::Center, _) => Align::Center,
-                    (HAlign::Right, _) => Align::Max,
-                    (HAlign::General, Value::Number(_)) => Align::Max,
-                    (HAlign::General, Value::Bool(_) | Value::Error(_)) => Align::Center,
-                    (HAlign::General, _) => Align::Min,
-                };
-                let x = match align {
-                    Align::Min => rect.left() + 4.0,
-                    Align::Center => rect.center().x - g.size().x / 2.0,
-                    Align::Max => rect.right() - 4.0 - g.size().x,
-                };
-                let at = pos2(x, rect.center().y - g.size().y / 2.0);
-                let clipped =
-                    painter.with_clip_rect(rect.shrink2(vec2(1.0, 0.0)).intersect(visible));
-                clipped.galley(at, g.clone(), color);
-                if style.bold {
-                    // The bundled font has no bold weight: strike twice, slightly offset.
-                    clipped.galley(at + vec2(0.55, 0.0), g, color);
-                }
+                paint_cell(l.cell_rect(vi, c), (r, c), None);
             }
+        }
+        for &(m, rect) in &merges {
+            paint_cell(rect, m.0, Some(m));
         }
 
         // Selection outline and cursor.
@@ -493,10 +514,14 @@ impl App {
                 egui::StrokeKind::Inside,
             );
         }
-        if let Some(vi) = self.view_index(self.sel.cursor.0)
-            && (self.sel.cursor.1 as usize) + 1 < l.xs.len()
-        {
-            let rect = l.cell_rect(vi, self.sel.cursor.1);
+        let cursor_rect = match self.sheet().merge_at(self.sel.cursor) {
+            Some(m) => self.merge_rect(l, m),
+            None => self
+                .view_index(self.sel.cursor.0)
+                .filter(|_| (self.sel.cursor.1 as usize) + 1 < l.xs.len())
+                .map(|vi| l.cell_rect(vi, self.sel.cursor.1)),
+        };
+        if let Some(rect) = cursor_rect {
             painter.rect_stroke(
                 rect,
                 0.0,
@@ -534,6 +559,44 @@ impl App {
                 );
             }
         }
+    }
+
+    /// Merges overlapping the visible area, with their on-screen rects.
+    fn visible_merges(
+        &self,
+        l: &Layout,
+        first_vi: u32,
+        last_vi: u32,
+        first_c: u32,
+        last_c: u32,
+    ) -> Vec<(crate::model::Merge, Rect)> {
+        let first_r = self.row_at(first_vi).unwrap_or(0);
+        let last_r = self.row_at(last_vi.saturating_sub(1)).unwrap_or(first_r);
+        self.sheet()
+            .merges
+            .iter()
+            .copied()
+            .filter(|&((r0, c0), (r1, c1))| {
+                r1 >= first_r && r0 <= last_r && c1 >= first_c && c0 < last_c
+            })
+            .filter_map(|m| Some((m, self.merge_rect(l, m)?)))
+            .collect()
+    }
+
+    /// Screen rect of a merged range (its visible rows, when filtered).
+    fn merge_rect(&self, l: &Layout, ((r0, c0), (r1, c1)): crate::model::Merge) -> Option<Rect> {
+        let v0 = self.first_visible_at_or_after(r0)?;
+        let v1 = self.last_visible_at_or_before(r1)?;
+        if v1 < v0 {
+            return None;
+        }
+        let c1 = c1.min(l.xs.len() as u32 - 2);
+        Some(l.cell_rect(v0, c0).union(l.cell_rect(v1, c1)))
+    }
+
+    /// True when the selection is one cell or exactly one merged range.
+    pub(crate) fn sel_is_single_cell(&self) -> bool {
+        self.sel.is_single() || self.sheet().merge_at(self.sel.cursor) == Some(self.sel.range())
     }
 
     fn first_visible_at_or_after(&self, row: u32) -> Option<u32> {
@@ -682,6 +745,14 @@ impl App {
     }
 
     fn cell_editor(&mut self, ui: &mut egui::Ui, l: &Layout) {
+        let Some(pos) = self.edit.as_ref().map(|e| e.pos) else {
+            return;
+        };
+        // A merged cell is edited across its whole range.
+        let merged = self
+            .sheet()
+            .merge_at(pos)
+            .and_then(|m| self.merge_rect(l, m));
         let Some(edit) = self.edit.as_mut() else {
             return;
         };
@@ -696,7 +767,7 @@ impl App {
         if (c as usize) + 1 >= l.xs.len() {
             return;
         }
-        let rect = l.cell_rect(vi, c);
+        let rect = merged.unwrap_or_else(|| l.cell_rect(vi, c));
         // Grow the editor to fit the text.
         let font = FontId::proportional(13.0);
         let text_w = ui.fonts_mut(|f| {

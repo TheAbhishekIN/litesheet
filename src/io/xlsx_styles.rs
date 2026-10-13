@@ -19,6 +19,8 @@ pub struct SheetFormatting {
     pub cells: Vec<(Pos, NumFmt, Style)>,
     /// Column widths in Excel character units.
     pub col_widths: Vec<(u32, f64)>,
+    /// Merged ranges.
+    pub merges: Vec<(Pos, Pos)>,
 }
 
 /// Formatting for every sheet, keyed by sheet name.
@@ -515,6 +517,18 @@ fn parse_worksheet(xml: &str, styles: &Styles) -> SheetFormatting {
                 for c in min..=max.min(min + 1024) {
                     out.col_widths.push((c - 1, w));
                 }
+            }
+        }
+        "mergeCell" => {
+            let range = attr(e, "ref").unwrap_or_default();
+            if let Some((a, b)) = range.split_once(':')
+                && let (Some(a), Some(b)) = (
+                    crate::model::refs::parse_cell(a),
+                    crate::model::refs::parse_cell(b),
+                )
+            {
+                out.merges
+                    .push(((a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1))));
             }
         }
         "c" => {

@@ -245,7 +245,7 @@ impl Structural<'_> {
     }
 
     /// New (start, end) of an inclusive span, or `None` if all of it was deleted.
-    fn map_span(&self, lo: u32, hi: u32) -> Option<(u32, u32)> {
+    pub fn map_span(&self, lo: u32, hi: u32) -> Option<(u32, u32)> {
         if self.count >= 0 {
             return Some((self.map_index(lo)?, self.map_index(hi)?));
         }
