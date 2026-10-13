@@ -162,6 +162,12 @@ impl App {
             }
             separator(ui);
 
+            // Charts.
+            if icon_button(ui, "Insert Chart", false, paint_chart_icon).clicked() {
+                self.open_chart_dialog(None);
+            }
+            separator(ui);
+
             // Number format.
             egui::ComboBox::from_id_salt("toolbar_number_format")
                 .selected_text(format_name(fmt))
@@ -365,4 +371,18 @@ fn paint_merge_icon(p: &egui::Painter, r: Rect, color: Color32) {
     p.line_segment([pos2(c - 4.0, y + 2.5), pos2(c - 1.5, y)], stroke);
     p.line_segment([pos2(c + 4.0, y - 2.5), pos2(c + 1.5, y)], stroke);
     p.line_segment([pos2(c + 4.0, y + 2.5), pos2(c + 1.5, y)], stroke);
+}
+
+fn paint_chart_icon(p: &egui::Painter, r: Rect, color: Color32) {
+    let base = r.bottom();
+    let w = r.width() / 4.0;
+    for (i, h) in [0.45, 0.8, 0.6].iter().enumerate() {
+        let x = r.left() + w * (i as f32 + 0.3) + i as f32 * 1.0;
+        let bar = Rect::from_min_max(pos2(x, base - r.height() * h), pos2(x + w * 0.85, base));
+        p.rect_filled(bar, 1.0, color);
+    }
+    p.line_segment(
+        [pos2(r.left(), base + 0.5), pos2(r.right(), base + 0.5)],
+        Stroke::new(1.0, color),
+    );
 }

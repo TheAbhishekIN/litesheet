@@ -6,6 +6,7 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ### Added
 
+- Charts: column, bar, line, area, pie and scatter, inserted from Insert → Chart… or the toolbar with a live preview. Charts can be moved, resized, edited and deleted, update with their data, follow structural changes, and are saved to and read from `.xlsx` as native Excel charts
 - Freeze panes (View menu): freeze the rows and columns above and left of the active cell, the top row, or the first column. Frozen panes follow inserted and deleted rows and columns, can be undone, and are kept in `.xlsx` files
 - Merged cells: Merge & Center (toolbar), Merge Cells and Unmerge (Format menu). A merged range selects, navigates and edits as one cell, follows inserted and deleted rows and columns, and is kept when opening and saving `.xlsx`
 - Cell styles: bold, italic, underline, strikethrough, text and fill colours, alignment and borders, from a new formatting toolbar and ⌘B/⌘I/⌘U. Styles survive typing, copy/paste, fill and sort; Edit → Clear Formats and Clear All remove them

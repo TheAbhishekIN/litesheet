@@ -156,6 +156,18 @@ impl App {
                     self.focus_search = true;
                 }
             });
+            ui.menu_button("Insert", |ui| {
+                if ui.button("Chart…").clicked() {
+                    self.open_chart_dialog(None);
+                }
+                ui.separator();
+                if ui.button("Rows Above").clicked() {
+                    self.insert_rows(false);
+                }
+                if ui.button("Columns Left").clicked() {
+                    self.insert_cols(false);
+                }
+            });
             ui.menu_button("Data", |ui| {
                 let col = self.sel.cursor.1;
                 let label = column_label(self.sheet(), col, self.view().header_row);

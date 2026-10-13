@@ -91,6 +91,11 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Typing is recognized: `2024-05-01` is a date, `14:30` or `2:30 PM` a time, `15%` a percentage, `$1,250.50` currency and `1,234` a number with separators; a leading `'` keeps text as text
 - Formats stay on empty cells, so you can format a column before typing; **Delete** clears values but keeps formats
 
+### Charts
+- Column, bar, line, area, pie and scatter charts from *Insert → Chart…* or the toolbar, with a live preview; the data range, series names and categories are detected from the selection
+- Charts float over the sheet: click to select, drag to move, drag the corner to resize, double-click to edit, **Delete** to remove
+- They update as the data changes, follow inserted and deleted rows and columns, and are saved to `.xlsx` as native Excel charts (and Excel charts are read back)
+
 ### AI (Bring Your Own Key)
 - **Generate formulas** from plain English, written for the selected cell using your column headers
 - **Explain** a selected range: what it contains, patterns, outliers
@@ -240,7 +245,7 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 - [x] More number formats (number, currency, scientific, time, text)
 - [x] Merged cells
 - [x] Freeze panes
-- [ ] Charts
+- [x] Charts
 - [ ] Tested Linux and Windows builds
 
 Have an idea? [Open a feature request](https://github.com/TheAbhishekIN/litesheet/issues/new/choose).

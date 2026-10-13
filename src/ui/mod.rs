@@ -5,6 +5,8 @@
 
 mod ai_panel;
 mod app;
+mod chart;
+mod chart_layer;
 pub(crate) mod commands;
 mod editing;
 mod files;

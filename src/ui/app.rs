@@ -68,6 +68,10 @@ pub struct App {
     pub scroll_to_cursor: bool,
     pub filter_buttons: bool,
     pub filter_popup: Option<FilterPopup>,
+    /// The chart selected on the sheet (index into the active sheet's charts).
+    pub selected_chart: Option<usize>,
+    pub(crate) chart_drag: Option<super::chart_layer::ChartDrag>,
+    pub(crate) chart_dialog: Option<super::chart_layer::ChartDialog>,
     pub context_target: Option<(Option<u32>, Option<u32>)>,
     pub resizing: Option<(u32, f32, f32)>,
     /// Bumped on every data change; used to cache selection stats.
@@ -110,6 +114,9 @@ impl App {
             scroll_to_cursor: false,
             filter_buttons: false,
             filter_popup: None,
+            selected_chart: None,
+            chart_drag: None,
+            chart_dialog: None,
             context_target: None,
             resizing: None,
             data_version: 0,
@@ -166,6 +173,8 @@ impl App {
         self.sel = Selection::single((0, 0));
         self.edit = None;
         self.filter_popup = None;
+        self.selected_chart = None;
+        self.chart_dialog = None;
         self.clip = None;
         self.data_version += 1;
         self.scroll_to_cursor = true;
@@ -179,6 +188,7 @@ impl App {
         self.active = idx;
         self.sel = Selection::single((0, 0));
         self.filter_popup = None;
+        self.selected_chart = None;
         self.data_changed();
         self.scroll_to_cursor = true;
     }
@@ -383,6 +393,7 @@ impl eframe::App for App {
             });
 
         self.filter_window(&ctx);
+        self.chart_window(&ctx);
         self.confirm_dialog(&ctx);
         self.update_title(&ctx);
     }

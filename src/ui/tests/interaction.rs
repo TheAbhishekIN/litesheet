@@ -409,3 +409,69 @@ fn freeze_panes_keep_headers_in_view() {
     key(&mut h, Key::Z, Modifiers::COMMAND);
     assert_eq!(h.state().sheet().freeze, Freeze { rows: 1, cols: 1 });
 }
+
+#[test]
+fn insert_move_and_delete_a_chart() {
+    use crate::model::ChartKind;
+    let mut h = harness(SALES_CSV);
+    // Chart the Units and Price columns against Product.
+    click(&mut h, cell(0, 3), Modifiers::NONE);
+    click(&mut h, cell(8, 5), Modifiers::SHIFT);
+    h.get_by_label("Insert Chart").click();
+    h.run_steps(2);
+    assert_eq!(h.state().chart_dialog.as_ref().unwrap().range, "D1:F9");
+    h.get_by_label("Line").click();
+    h.run_steps(2);
+    shot(&mut h, "chart-dialog");
+    h.get_by_label("Create Chart").click();
+    h.run_steps(3);
+    let chart = h.state().sheet().charts[0].clone();
+    assert_eq!(chart.kind, ChartKind::Line);
+    assert_eq!(chart.series.len(), 2);
+    assert_eq!(chart.anchor, (0, 7), "placed to the right of the data");
+    assert_eq!(h.state().selected_chart, Some(0));
+    shot(&mut h, "chart-on-sheet");
+
+    // Drag it down by four rows.
+    let start = cell(2, 9);
+    h.event(Event::PointerMoved(start));
+    h.event(Event::PointerButton {
+        pos: start,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    h.run_steps(2);
+    for i in 1..=8 {
+        h.event(Event::PointerMoved(
+            start + egui::vec2(0.0, 11.0 * i as f32),
+        ));
+        h.step();
+    }
+    let end = start + egui::vec2(0.0, 88.0);
+    h.event(Event::PointerButton {
+        pos: end,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run_steps(3);
+    assert_eq!(h.state().sheet().charts[0].anchor, (4, 7));
+    assert_eq!(h.state().book.undo_label(), Some("Move chart"));
+
+    // The chart reads live values.
+    click(&mut h, cell(1, 4), Modifiers::NONE);
+    type_text(&mut h, "99");
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    let data = h.state().sheet().charts[0].data(&h.state().book);
+    assert_eq!(data.series[0].1[0], Some(99.0));
+
+    // Select it and press Delete; undo brings it back.
+    click(&mut h, cell(8, 9), Modifiers::NONE);
+    assert_eq!(h.state().selected_chart, Some(0));
+    key(&mut h, Key::Delete, Modifiers::NONE);
+    assert!(h.state().sheet().charts.is_empty());
+    assert_eq!(display(&h, 8, 9), "", "Delete removed the chart, not cells");
+    key(&mut h, Key::Z, Modifiers::COMMAND);
+    assert_eq!(h.state().sheet().charts.len(), 1);
+}

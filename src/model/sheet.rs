@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{Cell, NumFmt, Pos, Value, format_value, refs};
+use super::{Cell, Chart, NumFmt, Pos, Value, format_value, refs};
 
 /// Rows above and columns left of the freeze line stay put while scrolling.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -42,6 +42,8 @@ pub struct Sheet {
     pub merges: Vec<Merge>,
     /// Frozen panes: how many top rows and left columns stay in view.
     pub freeze: Freeze,
+    /// Charts floating over the sheet.
+    pub charts: Vec<Chart>,
     /// Used extent: one past the last non-empty row/col.
     pub n_rows: u32,
     pub n_cols: u32,
@@ -57,6 +59,7 @@ impl Sheet {
             col_widths: HashMap::new(),
             merges: Vec::new(),
             freeze: Freeze::default(),
+            charts: Vec::new(),
             n_rows: 0,
             n_cols: 0,
         }

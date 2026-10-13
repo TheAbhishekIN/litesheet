@@ -143,9 +143,14 @@ impl App {
             return;
         }
         if sc(Modifiers::NONE, Key::Delete) || sc(Modifiers::NONE, Key::Backspace) {
-            self.clear_selection();
+            if self.selected_chart.is_some() {
+                self.delete_selected_chart();
+            } else {
+                self.clear_selection();
+            }
         }
-        if sc(Modifiers::NONE, Key::Escape) {
+        // Esc deselects a chart first, then drops the copy outline and multi-selection.
+        if sc(Modifiers::NONE, Key::Escape) && self.selected_chart.take().is_none() {
             self.clip = None;
             self.sel = Selection::single(self.sel.cursor);
         }
