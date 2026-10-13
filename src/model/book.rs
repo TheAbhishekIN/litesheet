@@ -10,7 +10,7 @@ use formualizer::workbook::{Workbook as Engine, WorkbookConfig};
 
 use super::format::date_to_serial;
 use super::refs::{self, Axis, Structural};
-use super::{Cell, Pos, Sheet, Value, interpret_input, parse_literal};
+use super::{Cell, NumFmt, Pos, Sheet, Value, interpret_input, parse_literal};
 
 #[derive(Clone, Debug)]
 pub struct CellChange {
@@ -350,7 +350,7 @@ impl Book {
         let mut changes = Vec::with_capacity(edits.len());
         let mut touched = HashSet::new();
         for (sheet, pos, new) in edits {
-            let new = new.filter(|c| !c.raw.is_empty());
+            let new = new.filter(|c| !c.is_blank());
             let old = self.sheets[sheet].cells.get(&pos).cloned();
             if old == new {
                 continue;
@@ -488,6 +488,13 @@ impl Book {
                 let _ = engine.set_value(&s.name, r, c, LiteralValue::Empty);
             }
             Some(cell) => {
+                if cell.raw.is_empty() {
+                    // Formatted but empty.
+                    s.values.remove(&pos);
+                    let _ = engine.set_value(&s.name, r, c, LiteralValue::Empty);
+                    s.cells.insert(pos, cell);
+                    return;
+                }
                 if cell.is_formula() {
                     s.formulas.insert(pos);
                     s.values.insert(pos, Value::Empty);
@@ -495,7 +502,11 @@ impl Book {
                         s.values.insert(pos, Value::Error("#NAME?".into()));
                     }
                 } else {
-                    let v = parse_literal(&cell.raw);
+                    let v = if cell.fmt == NumFmt::Text {
+                        Value::Text(cell.raw.clone())
+                    } else {
+                        parse_literal(&cell.raw)
+                    };
                     let _ = engine.set_value(&s.name, r, c, to_literal(&v));
                     s.values.insert(pos, v);
                 }

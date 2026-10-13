@@ -188,19 +188,7 @@ impl App {
                     self.data_changed();
                 }
             });
-            ui.menu_button("Format", |ui| {
-                use model::NumFmt::*;
-                for (fmt, label) in [
-                    (General, "General"),
-                    (Percent, "Percent"),
-                    (Date, "Date"),
-                    (DateTime, "Date & Time"),
-                ] {
-                    if ui.button(label).clicked() {
-                        self.set_format(fmt);
-                    }
-                }
-            });
+            ui.menu_button("Format", |ui| self.format_menu(ui));
             ui.menu_button("AI", |ui| {
                 for task in ai::Task::ALL {
                     if ui.button(super::ai_panel::menu_label(task)).clicked() {
@@ -237,5 +225,64 @@ impl App {
                 ui.label(RichText::new("Zoom: ⌘+ / ⌘−").weak());
             });
         });
+    }
+
+    fn format_menu(&mut self, ui: &mut egui::Ui) {
+        use model::{Currency, NumFmt};
+        let current = self.sheet().fmt(self.sel.cursor);
+        let same_kind =
+            |a: NumFmt, b: NumFmt| std::mem::discriminant(&a) == std::mem::discriminant(&b);
+        let mut item = |ui: &mut egui::Ui, label: &str, example: &str, fmt: NumFmt| {
+            let button =
+                egui::Button::selectable(same_kind(current, fmt), label).shortcut_text(example);
+            if ui.add(button).clicked() {
+                self.set_format(fmt);
+                ui.close();
+            }
+        };
+        item(ui, "General", "1234.5", NumFmt::General);
+        item(
+            ui,
+            "Number",
+            "1,234.50",
+            NumFmt::Number {
+                decimals: 2,
+                thousands: true,
+            },
+        );
+        ui.menu_button("Currency", |ui| {
+            for symbol in Currency::ALL {
+                let example = format!("{}1,234.50", symbol.symbol());
+                item(
+                    ui,
+                    symbol.name(),
+                    &example,
+                    NumFmt::Currency {
+                        decimals: 2,
+                        symbol,
+                    },
+                );
+            }
+        });
+        item(ui, "Percent", "12%", NumFmt::Percent { decimals: Some(0) });
+        item(
+            ui,
+            "Scientific",
+            "1.23E+04",
+            NumFmt::Scientific { decimals: 2 },
+        );
+        ui.separator();
+        item(ui, "Date", "2024-05-01", NumFmt::Date);
+        item(ui, "Time", "14:30:00", NumFmt::Time);
+        item(ui, "Date & Time", "2024-05-01 14:30", NumFmt::DateTime);
+        ui.separator();
+        item(ui, "Text", "00042", NumFmt::Text);
+        ui.separator();
+        if ui.button("Increase Decimal").clicked() {
+            self.adjust_decimals(1);
+        }
+        if ui.button("Decrease Decimal").clicked() {
+            self.adjust_decimals(-1);
+        }
     }
 }

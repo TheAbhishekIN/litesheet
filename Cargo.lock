@@ -2936,6 +2936,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "zip 8.6.0",
 ]
 
 [[package]]

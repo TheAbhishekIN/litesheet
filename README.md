@@ -79,8 +79,9 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
   - a searchable checklist of the column's values
 - Filtered rows are only hidden, never deleted; arrow keys skip them, and the status bar shows how many rows are visible
 - **Find** (**⌘F**) highlights every match and steps through them; tick "Only matching rows" to show just those rows
-- **Number formats:** General, Percent, Date, and Date & Time
-- Typing `2024-05-01` stores a date and `15%` a percentage; a leading `'` keeps text as text
+- **Number formats:** General, Number (`1,234.50`), Currency (`$ € £ ¥ ₹`), Percent, Scientific, Date, Time, Date & Time and Text, with Increase/Decrease Decimal
+- Typing is recognized: `2024-05-01` is a date, `14:30` or `2:30 PM` a time, `15%` a percentage, `$1,250.50` currency and `1,234` a number with separators; a leading `'` keeps text as text
+- Formats stay on empty cells, so you can format a column before typing; **Delete** clears values but keeps formats
 
 ### AI (Bring Your Own Key)
 - **Generate formulas** from plain English, written for the selected cell using your column headers
@@ -227,7 +228,9 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 - [ ] Cell styling (bold, colours, borders, alignment); styles in imported files are currently dropped on save
 - [x] Rewrite formulas when a sheet is renamed
 - [ ] Open files from Finder (double-click, *Open With*)
-- [ ] Freeze panes, merged cells, more number formats
+- [x] More number formats (number, currency, scientific, time, text)
+- [ ] Merged cells
+- [ ] Freeze panes
 - [ ] Charts
 - [ ] Tested Linux and Windows builds
 

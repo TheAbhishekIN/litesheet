@@ -73,6 +73,47 @@ mod tests {
         assert_eq!(s.display((4, 1)), "2024-05-01");
         assert_eq!(l.sheets[1].display((0, 0)), "6.5");
 
+        // Number formats are written as Excel format codes.
+        let mut f = Book::new_blank();
+        let cur = crate::model::NumFmt::Currency {
+            decimals: 2,
+            symbol: crate::model::Currency::Euro,
+        };
+        f.apply(
+            "f",
+            vec![(
+                0,
+                (0, 0),
+                Some(crate::model::Cell {
+                    raw: "12.5".into(),
+                    fmt: cur,
+                }),
+            )],
+        );
+        let sci = crate::model::NumFmt::Scientific { decimals: 1 };
+        f.apply(
+            "f",
+            vec![(
+                0,
+                (1, 0),
+                Some(crate::model::Cell {
+                    raw: String::new(),
+                    fmt: sci,
+                }),
+            )],
+        );
+        let fx = dir.join("formats.xlsx");
+        save(&f, 0, &fx).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&fx).unwrap()).unwrap();
+        let mut styles = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("xl/styles.xml").unwrap(), &mut styles)
+            .unwrap();
+        assert!(
+            styles.contains("formatCode=\"&quot;€&quot;#,##0.00\""),
+            "{styles}"
+        );
+        assert!(styles.contains("formatCode=\"0.0E+00\""), "{styles}");
+
         let csv = dir.join("t.csv");
         save(&b, 0, &csv).unwrap();
         let l = load(&csv).unwrap();

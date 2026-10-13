@@ -206,3 +206,37 @@ fn insert_and_delete_rows_from_context_menu() {
     key(&mut h, Key::Z, Modifiers::COMMAND);
     assert_eq!(display(&h, 0, 1), "Date");
 }
+
+#[test]
+fn number_format_menu_and_decimals() {
+    let mut h = harness(SALES_CSV);
+    // Select the Price column values F2:F9 and make them dollars.
+    click(&mut h, cell(1, 5), Modifiers::NONE);
+    click(&mut h, cell(8, 5), Modifiers::SHIFT);
+    h.get_by_label("Format").click();
+    h.run_steps(2);
+    h.get_by_label_contains("Currency").hover();
+    h.run_steps(3);
+    shot(&mut h, "format-menu");
+    h.get_by_label_contains("Dollar").click();
+    h.run_steps(2);
+    assert_eq!(display(&h, 2, 5), "$120.00");
+    assert_eq!(display(&h, 1, 5), "$19.99");
+
+    h.state_mut().adjust_decimals(-1);
+    h.run_steps(1);
+    assert_eq!(display(&h, 1, 5), "$20.0");
+    h.state_mut().adjust_decimals(-1);
+    assert_eq!(display(&h, 2, 5), "$120");
+
+    // Delete clears the values but keeps the format for the next entry.
+    key(&mut h, Key::Delete, Modifiers::NONE);
+    assert_eq!(display(&h, 1, 5), "");
+    click(&mut h, cell(1, 5), Modifiers::NONE);
+    type_text(&mut h, "5");
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(display(&h, 1, 5), "$5");
+
+    // Editing a currency cell shows the plain number.
+    assert_eq!(h.state().sheet().edit_text((1, 5)), "5");
+}
