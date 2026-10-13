@@ -74,9 +74,9 @@ pub(super) fn load(path: &Path) -> Result<Book> {
                     cell.raw = text.to_string();
                 }
             }
-            widths.push((f.col_widths, f.merges));
+            widths.push((f.col_widths, f.merges, f.freeze));
         } else {
-            widths.push((Vec::new(), Vec::new()));
+            widths.push((Vec::new(), Vec::new(), None));
         }
         sheets.push((name, cells.into_iter().collect()));
     }
@@ -84,13 +84,16 @@ pub(super) fn load(path: &Path) -> Result<Book> {
         return Err(anyhow!("The workbook has no sheets"));
     }
     let mut book = Book::from_sheets(sheets);
-    for (sheet, (widths, merges)) in book.sheets.iter_mut().zip(widths) {
+    for (sheet, (widths, merges, freeze)) in book.sheets.iter_mut().zip(widths) {
         for (col, chars) in widths {
             sheet
                 .col_widths
                 .insert(col, (chars as f32 * PX_PER_CHAR).round());
         }
         sheet.merges = merges.into_iter().filter(|(a, b)| a != b).collect();
+        if let Some((rows, cols)) = freeze {
+            sheet.freeze = crate::model::Freeze { rows, cols };
+        }
     }
     Ok(book)
 }
@@ -140,6 +143,12 @@ pub(super) fn save(book: &Book, path: &Path) -> Result<()> {
             if col <= u16::MAX as u32 {
                 ws.set_column_width(col as u16, (w / PX_PER_CHAR) as f64)?;
             }
+        }
+        if sheet.freeze.is_active() {
+            ws.set_freeze_panes(
+                sheet.freeze.rows,
+                sheet.freeze.cols.min(u16::MAX as u32) as u16,
+            )?;
         }
         // Merges first: merge_range writes the range as text, so the real
         // top-left value (number, formula, …) is written over it below.

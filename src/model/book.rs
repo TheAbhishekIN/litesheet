@@ -10,7 +10,7 @@ use formualizer::workbook::{Workbook as Engine, WorkbookConfig};
 
 use super::format::date_to_serial;
 use super::refs::{self, Axis, Structural};
-use super::sheet::{Merge, merge_contains, merges_overlap};
+use super::sheet::{Freeze, Merge, merge_contains, merges_overlap};
 use super::{Cell, HAlign, NumFmt, Pos, Sheet, Value, interpret_input, parse_literal};
 
 #[derive(Clone, Debug)]
@@ -38,6 +38,11 @@ pub enum MetaChange {
         sheet: usize,
         old: Vec<Merge>,
         new: Vec<Merge>,
+    },
+    Freeze {
+        sheet: usize,
+        old: Freeze,
+        new: Freeze,
     },
 }
 
@@ -310,6 +315,37 @@ impl Book {
             meta.push(m);
         }
 
+        // The freeze line moves with rows/columns inserted or deleted above/left of it.
+        let old_freeze = self.sheets[sheet].freeze;
+        let line = |n: u32| -> u32 {
+            if at >= n {
+                n
+            } else if count > 0 {
+                n + count as u32
+            } else {
+                n - (n.min(at + count.unsigned_abs() as u32) - at)
+            }
+        };
+        let new_freeze = match axis {
+            Axis::Rows => Freeze {
+                rows: line(old_freeze.rows),
+                ..old_freeze
+            },
+            Axis::Cols => Freeze {
+                cols: line(old_freeze.cols),
+                ..old_freeze
+            },
+        };
+        if new_freeze != old_freeze {
+            let m = MetaChange::Freeze {
+                sheet,
+                old: old_freeze,
+                new: new_freeze,
+            };
+            self.apply_meta(&m, false)?;
+            meta.push(m);
+        }
+
         let what = match axis {
             Axis::Rows => "row",
             Axis::Cols => "column",
@@ -382,6 +418,26 @@ impl Book {
         let meta = MetaChange::Merges { sheet, old, new };
         let _ = self.apply_meta(&meta, false);
         self.commit("Unmerge cells", Vec::new(), vec![meta]);
+    }
+
+    /// Freeze the given number of top rows and left columns (0, 0 unfreezes).
+    pub fn set_freeze(&mut self, sheet: usize, freeze: Freeze) {
+        let old = self.sheets[sheet].freeze;
+        if old == freeze {
+            return;
+        }
+        let meta = MetaChange::Freeze {
+            sheet,
+            old,
+            new: freeze,
+        };
+        let _ = self.apply_meta(&meta, false);
+        let label = if freeze.is_active() {
+            "Freeze panes"
+        } else {
+            "Unfreeze panes"
+        };
+        self.commit(label, Vec::new(), vec![meta]);
     }
 
     pub fn delete_sheet(&mut self, idx: usize) {
@@ -564,6 +620,9 @@ impl Book {
             MetaChange::Merges { sheet, old, new } => {
                 self.sheets[*sheet].merges = if backwards { old } else { new }.clone();
             }
+            MetaChange::Freeze { sheet, old, new } => {
+                self.sheets[*sheet].freeze = if backwards { *old } else { *new };
+            }
         }
         self.dirty = true;
         Ok(())
@@ -669,7 +728,8 @@ impl MetaChange {
         match self {
             MetaChange::RenameSheet { sheet, .. }
             | MetaChange::ColWidths { sheet, .. }
-            | MetaChange::Merges { sheet, .. } => *sheet,
+            | MetaChange::Merges { sheet, .. }
+            | MetaChange::Freeze { sheet, .. } => *sheet,
         }
     }
 }

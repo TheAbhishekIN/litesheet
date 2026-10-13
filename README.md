@@ -60,6 +60,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Insert and delete rows and columns from the Edit menu or by right-clicking a header; formulas, ranges and column widths follow
 - 200-step undo and redo for every change, including paste, fill and sort
 - Live Sum, Average and Count of the selection in the status bar
+- **Freeze panes** (View menu): keep header rows and columns in view while scrolling
 - Light and dark themes, and zoom with **⌘+** / **⌘−**
 
 ### Styling
@@ -67,7 +68,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Text on a coloured fill switches between dark and light automatically to stay readable
 - **Merge & Center**, Merge Cells and Unmerge (toolbar or Format menu); a merged range behaves as one cell for selection, arrow keys and editing
 - Styles are kept when you type over a cell, copy, fill or sort; **Delete** keeps them, *Edit → Clear Formats* and *Clear All* remove them
-- Fonts, colours (including Excel theme colours), fills, borders, alignment, number formats, merged cells and column widths are read from `.xlsx` files and written back on save
+- Fonts, colours (including Excel theme colours), fills, borders, alignment, number formats, merged cells, frozen panes and column widths are read from `.xlsx` files and written back on save
 
 ### Formulas
 - 400+ Excel-compatible functions, powered by [formualizer](https://crates.io/crates/formualizer): `SUM`, `SUMIFS`, `VLOOKUP`, `INDEX`/`MATCH`, `IF`, `TEXT`, `ROUND` and many more
@@ -238,7 +239,7 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 - [ ] Open files from Finder (double-click, *Open With*)
 - [x] More number formats (number, currency, scientific, time, text)
 - [x] Merged cells
-- [ ] Freeze panes
+- [x] Freeze panes
 - [ ] Charts
 - [ ] Tested Linux and Windows builds
 

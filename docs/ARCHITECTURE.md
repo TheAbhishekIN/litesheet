@@ -140,6 +140,8 @@ The spreadsheet data sent with each task is built in `ui/ai_panel.rs` (`ai_conte
 
 `grid_ui` gives a `ScrollArea` the full content size (every column width plus row count × row height) and uses `show_viewport` to learn which part is visible. Only the visible cells are laid out and painted. Headers are painted last, pinned to the viewport edges, so they stay on top while scrolling.
 
+Frozen panes split the grid into four regions (corner, frozen rows, frozen columns, scrolling area). `Layout::cell_rect` places frozen rows relative to the viewport top and frozen columns relative to its left edge, so they stay pinned. Each region is painted with its own clip rect, scrolling area first, so cells that scroll under a frozen band are hidden.
+
 The whole grid is one interactive area. Mouse positions are mapped to a `Hit` (cell, header, resize handle, filter button) by `hit_test`.
 
 ### Editing and focus

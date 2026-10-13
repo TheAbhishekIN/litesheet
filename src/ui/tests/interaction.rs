@@ -363,3 +363,49 @@ fn merge_cells_from_toolbar() {
     h.run_steps(2);
     assert!(h.state().sheet().merges.is_empty());
 }
+
+#[test]
+fn freeze_panes_keep_headers_in_view() {
+    use crate::model::Freeze;
+    let mut h = harness(SALES_CSV);
+    // Freeze at B2: row 1 and column A stay put.
+    click(&mut h, cell(1, 1), Modifiers::NONE);
+    h.get_by_label("View").click();
+    h.run_steps(2);
+    h.get_by_label("Freeze Panes at B2").click();
+    h.run_steps(2);
+    assert_eq!(h.state().sheet().freeze, Freeze { rows: 1, cols: 1 });
+
+    // Scroll down 3 rows and right past column C.
+    let mid = cell(6, 4);
+    h.event(Event::PointerMoved(mid));
+    h.event(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(-210.0, -66.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+    });
+    h.run_steps(3);
+    shot(&mut h, "frozen");
+
+    // The frozen header row and column are still where they were…
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    assert_eq!(h.state().sel.cursor, (0, 0));
+    click(&mut h, cell(4, 0), Modifiers::NONE);
+    assert_eq!(
+        h.state().sel.cursor,
+        (7, 0),
+        "column A is pinned, rows scrolled by 3"
+    );
+    click(&mut h, cell(0, 3), Modifiers::NONE);
+    assert_eq!(h.state().sel.cursor.0, 0, "row 1 is pinned");
+    assert!(h.state().sel.cursor.1 > 3, "columns scrolled");
+    // …and a scrolled cell is under the pointer as expected.
+    click(&mut h, cell(4, 4), Modifiers::NONE);
+    assert_eq!(h.state().sel.cursor.0, 7);
+
+    // Unfreeze, which is undoable.
+    h.state_mut().set_freeze(Freeze::default());
+    key(&mut h, Key::Z, Modifiers::COMMAND);
+    assert_eq!(h.state().sheet().freeze, Freeze { rows: 1, cols: 1 });
+}
