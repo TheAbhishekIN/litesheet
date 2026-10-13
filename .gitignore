@@ -1,3 +1,6 @@
 /target
 /dist
 .DS_Store
+
+# Local Claude Code state
+/.claude/
