@@ -5,7 +5,9 @@
 
 mod ai_panel;
 mod app;
-mod commands;
+mod chart;
+mod chart_layer;
+pub(crate) mod commands;
 mod editing;
 mod files;
 mod filtering;
@@ -17,6 +19,7 @@ mod search;
 mod selection;
 mod sheet_tabs;
 mod status_bar;
+mod toolbar;
 mod util;
 
 #[cfg(test)]

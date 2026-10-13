@@ -14,7 +14,7 @@ use image::{Rgba, RgbaImage};
 use super::{mock_ai_server, wait_for_ai};
 use crate::ai::Task;
 use crate::model::filter::{ColumnFilter, Condition, Op};
-use crate::model::{Book, NumFmt, interpret_input};
+use crate::model::{Book, Cell, NumFmt, Style, interpret_input};
 use crate::ui::Selection;
 use crate::ui::app::{App, CELL_EDITOR_ID, EditState};
 
@@ -44,6 +44,8 @@ fn generate_docs_assets() {
     ai_formula();
     ai_filter();
     ai_summary();
+    charts();
+    formatting();
 }
 
 /* ------------------------------ sample data ------------------------------ */
@@ -166,9 +168,74 @@ pub fn sample_book() -> Book {
     for (c, w) in [110.0, 110.0, 80.0, 100.0].iter().enumerate() {
         book.sheets[1].col_widths.insert(c as u32, *w);
     }
+    style_sample(&mut book);
     book.dirty = false;
     book.path = Some(PathBuf::from("sales.xlsx"));
     book
+}
+
+/// Give the sample the finish a real workbook would have: styled, frozen
+/// headers, currency columns, a highlighted total and a chart.
+fn style_sample(book: &mut Book) {
+    use crate::model::{Borders, Chart, ChartKind, Currency, Freeze, HAlign, Rgb};
+    let header = Style {
+        bold: true,
+        color: Some(Rgb::WHITE),
+        fill: Some(Rgb(21, 128, 61)),
+        align: HAlign::Center,
+        ..Style::default()
+    };
+    let dollars = NumFmt::Currency {
+        decimals: 2,
+        symbol: Currency::Dollar,
+    };
+    let restyle =
+        |book: &mut Book, sheet: usize, positions: Vec<(u32, u32)>, f: &dyn Fn(&mut Cell)| {
+            let edits = positions
+                .into_iter()
+                .map(|p| {
+                    let mut cell = book.sheets[sheet]
+                        .cells
+                        .get(&p)
+                        .cloned()
+                        .unwrap_or_default();
+                    f(&mut cell);
+                    (sheet, p, Some(cell))
+                })
+                .collect();
+            book.apply("style", edits);
+        };
+    restyle(book, 0, (0..9).map(|c| (0, c)).collect(), &|c| {
+        c.style = header
+    });
+    restyle(
+        book,
+        0,
+        (1..49).flat_map(|r| [(r, 6), (r, 7)]).collect(),
+        &|c| c.fmt = dollars,
+    );
+    restyle(book, 1, (0..4).map(|c| (0, c)).collect(), &|c| {
+        c.style = header
+    });
+    restyle(
+        book,
+        1,
+        (1..6).flat_map(|r| [(r, 1), (r, 3)]).collect(),
+        &|c| c.fmt = dollars,
+    );
+    restyle(book, 1, (0..4).map(|c| (5, c)).collect(), &|c| {
+        c.style.bold = true;
+        c.style.borders = Borders {
+            top: true,
+            ..Borders::NONE
+        };
+    });
+    book.set_freeze(0, Freeze { rows: 1, cols: 0 });
+    let mut chart = Chart::from_block(&book.sheets[1], (0, 0), (4, 1), ChartKind::Column).unwrap();
+    chart.title = "Revenue by region".into();
+    chart.anchor = (0, 5);
+    chart.size = (440.0, 280.0);
+    book.set_charts(1, vec![chart], "chart");
 }
 
 /* ------------------------------ screenshots ------------------------------ */
@@ -256,7 +323,7 @@ fn filtering() {
     );
     h.state_mut().open_filter_popup(2);
     if let Some(p) = h.state_mut().filter_popup.as_mut() {
-        p.anchor = Some(pos2(196.0, 84.0));
+        p.anchor = Some(pos2(196.0, 122.0));
     }
     save(&mut h, "filtering");
 }
@@ -271,6 +338,24 @@ fn search() {
     h.state_mut().sel = Selection::single(matches[2]);
     h.state_mut().views[0].current_match = 2;
     save(&mut h, "search");
+}
+
+fn charts() {
+    let mut h = docs_harness(Theme::Light);
+    h.state_mut().switch_sheet(1);
+    h.state_mut().selected_chart = Some(0);
+    h.state_mut().sel = Selection::single((1, 1));
+    save(&mut h, "charts");
+}
+
+fn formatting() {
+    let mut h = docs_harness(Theme::Dark);
+    h.state_mut().sel = Selection {
+        anchor: (1, 6),
+        cursor: (12, 7),
+    };
+    h.get_by_label_contains("Fill").click();
+    save(&mut h, "formatting");
 }
 
 fn ai_harness(theme: Theme, task: Task, prompt: &str) -> Harness<'static, App> {

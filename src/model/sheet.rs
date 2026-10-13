@@ -2,7 +2,31 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{Cell, NumFmt, Pos, Value, format_value, refs};
+use super::{Cell, Chart, NumFmt, Pos, Value, format_value, refs};
+
+/// Rows above and columns left of the freeze line stay put while scrolling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Freeze {
+    pub rows: u32,
+    pub cols: u32,
+}
+
+impl Freeze {
+    pub fn is_active(self) -> bool {
+        self.rows > 0 || self.cols > 0
+    }
+}
+
+/// A merged range: (top-left, bottom-right), inclusive.
+pub type Merge = (Pos, Pos);
+
+pub fn merge_contains(m: Merge, p: Pos) -> bool {
+    (m.0.0..=m.1.0).contains(&p.0) && (m.0.1..=m.1.1).contains(&p.1)
+}
+
+pub fn merges_overlap(a: Merge, b: Merge) -> bool {
+    a.0.0 <= b.1.0 && b.0.0 <= a.1.0 && a.0.1 <= b.1.1 && b.0.1 <= a.1.1
+}
 
 /// Width of a column that hasn't been resized, in points.
 pub const DEFAULT_COL_WIDTH: f32 = 100.0;
@@ -14,6 +38,12 @@ pub struct Sheet {
     pub values: HashMap<Pos, Value>,
     pub(crate) formulas: HashSet<Pos>,
     pub col_widths: HashMap<u32, f32>,
+    /// Merged ranges as (top-left, bottom-right), inclusive. Never overlapping.
+    pub merges: Vec<Merge>,
+    /// Frozen panes: how many top rows and left columns stay in view.
+    pub freeze: Freeze,
+    /// Charts floating over the sheet.
+    pub charts: Vec<Chart>,
     /// Used extent: one past the last non-empty row/col.
     pub n_rows: u32,
     pub n_cols: u32,
@@ -27,6 +57,9 @@ impl Sheet {
             values: HashMap::new(),
             formulas: HashSet::new(),
             col_widths: HashMap::new(),
+            merges: Vec::new(),
+            freeze: Freeze::default(),
+            charts: Vec::new(),
             n_rows: 0,
             n_cols: 0,
         }
@@ -56,17 +89,33 @@ impl Sheet {
             None => String::new(),
             Some(c) if c.is_formula() => c.raw.clone(),
             Some(c) => match (c.fmt, self.value(pos)) {
-                (NumFmt::Date | NumFmt::DateTime | NumFmt::Percent, v @ Value::Number(_)) => {
-                    format_value(v, c.fmt)
-                }
+                (
+                    NumFmt::Date | NumFmt::DateTime | NumFmt::Time | NumFmt::Percent { .. },
+                    v @ Value::Number(_),
+                ) => format_value(v, c.fmt),
                 _ => c.raw.clone(),
             },
         }
     }
 
+    /// The merged range containing `pos`, if any.
+    pub fn merge_at(&self, pos: Pos) -> Option<Merge> {
+        self.merges
+            .iter()
+            .copied()
+            .find(|&m| merge_contains(m, pos))
+    }
+
+    /// The used range counts cells with content, not ones that only carry a format.
     pub(crate) fn recompute_extent(&mut self) {
-        self.n_rows = self.cells.keys().map(|p| p.0 + 1).max().unwrap_or(0);
-        self.n_cols = self.cells.keys().map(|p| p.1 + 1).max().unwrap_or(0);
+        let used = || {
+            self.cells
+                .iter()
+                .filter(|(_, c)| !c.raw.is_empty())
+                .map(|(p, _)| *p)
+        };
+        self.n_rows = used().map(|p| p.0 + 1).max().unwrap_or(0);
+        self.n_cols = used().map(|p| p.1 + 1).max().unwrap_or(0);
     }
 }
 

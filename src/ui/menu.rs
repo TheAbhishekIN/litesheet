@@ -5,8 +5,8 @@ use egui::{Key, KeyboardShortcut, Modifiers, RichText};
 use super::app::{App, Pending};
 use super::util::sc_text;
 use crate::ai;
-use crate::model;
 use crate::model::filter::column_label;
+use crate::model::{self, refs};
 
 impl App {
     pub(crate) fn menu_bar(&mut self, ui: &mut egui::Ui) {
@@ -99,6 +99,12 @@ impl App {
                 {
                     self.clear_selection();
                 }
+                if ui.button("Clear Formats").clicked() {
+                    self.clear_formats();
+                }
+                if ui.button("Clear All").clicked() {
+                    self.clear_all();
+                }
                 ui.separator();
                 if ui
                     .add(egui::Button::new("Fill Down").shortcut_text(sc_text(&ctx, Key::D, false)))
@@ -117,12 +123,49 @@ impl App {
                     self.fill(false);
                 }
                 ui.separator();
+                let (_, nr) = self.selected_rows();
+                let (_, nc) = self.selected_cols();
+                let rows = if nr == 1 {
+                    "Row".to_string()
+                } else {
+                    format!("{nr} Rows")
+                };
+                let cols = if nc == 1 {
+                    "Column".to_string()
+                } else {
+                    format!("{nc} Columns")
+                };
+                if ui.button(format!("Insert {rows} Above")).clicked() {
+                    self.insert_rows(false);
+                }
+                if ui.button(format!("Insert {cols} Left")).clicked() {
+                    self.insert_cols(false);
+                }
+                if ui.button(format!("Delete {rows}")).clicked() {
+                    self.delete_rows();
+                }
+                if ui.button(format!("Delete {cols}")).clicked() {
+                    self.delete_cols();
+                }
+                ui.separator();
                 if ui
                     .add(egui::Button::new("Find…").shortcut_text(sc_text(&ctx, Key::F, false)))
                     .clicked()
                 {
                     self.show_search = true;
                     self.focus_search = true;
+                }
+            });
+            ui.menu_button("Insert", |ui| {
+                if ui.button("Chart…").clicked() {
+                    self.open_chart_dialog(None);
+                }
+                ui.separator();
+                if ui.button("Rows Above").clicked() {
+                    self.insert_rows(false);
+                }
+                if ui.button("Columns Left").clicked() {
+                    self.insert_cols(false);
                 }
             });
             ui.menu_button("Data", |ui| {
@@ -163,19 +206,7 @@ impl App {
                     self.data_changed();
                 }
             });
-            ui.menu_button("Format", |ui| {
-                use model::NumFmt::*;
-                for (fmt, label) in [
-                    (General, "General"),
-                    (Percent, "Percent"),
-                    (Date, "Date"),
-                    (DateTime, "Date & Time"),
-                ] {
-                    if ui.button(label).clicked() {
-                        self.set_format(fmt);
-                    }
-                }
-            });
+            ui.menu_button("Format", |ui| self.format_menu(ui));
             ui.menu_button("AI", |ui| {
                 for task in ai::Task::ALL {
                     if ui.button(super::ai_panel::menu_label(task)).clicked() {
@@ -201,6 +232,24 @@ impl App {
                 }
             });
             ui.menu_button("View", |ui| {
+                let frozen = self.sheet().freeze;
+                let cell = refs::cell_name(self.sel.cursor.0, self.sel.cursor.1);
+                if ui.button(format!("Freeze Panes at {cell}")).clicked() {
+                    self.freeze_at_cursor();
+                }
+                if ui.button("Freeze Top Row").clicked() {
+                    self.set_freeze(model::Freeze { rows: 1, cols: 0 });
+                }
+                if ui.button("Freeze First Column").clicked() {
+                    self.set_freeze(model::Freeze { rows: 0, cols: 1 });
+                }
+                if ui
+                    .add_enabled(frozen.is_active(), egui::Button::new("Unfreeze Panes"))
+                    .clicked()
+                {
+                    self.set_freeze(model::Freeze::default());
+                }
+                ui.separator();
                 let mut dark = ui.visuals().dark_mode;
                 if ui.checkbox(&mut dark, "Dark mode").changed() {
                     ctx.set_theme(if dark {
@@ -212,5 +261,87 @@ impl App {
                 ui.label(RichText::new("Zoom: ⌘+ / ⌘−").weak());
             });
         });
+    }
+
+    fn format_menu(&mut self, ui: &mut egui::Ui) {
+        use model::{Currency, NumFmt};
+        let current = self.sheet().fmt(self.sel.cursor);
+        let same_kind =
+            |a: NumFmt, b: NumFmt| std::mem::discriminant(&a) == std::mem::discriminant(&b);
+        let mut item = |ui: &mut egui::Ui, label: &str, example: &str, fmt: NumFmt| {
+            let button =
+                egui::Button::selectable(same_kind(current, fmt), label).shortcut_text(example);
+            if ui.add(button).clicked() {
+                self.set_format(fmt);
+                ui.close();
+            }
+        };
+        item(ui, "General", "1234.5", NumFmt::General);
+        item(
+            ui,
+            "Number",
+            "1,234.50",
+            NumFmt::Number {
+                decimals: 2,
+                thousands: true,
+            },
+        );
+        ui.menu_button("Currency", |ui| {
+            for symbol in Currency::ALL {
+                let example = format!("{}1,234.50", symbol.symbol());
+                item(
+                    ui,
+                    symbol.name(),
+                    &example,
+                    NumFmt::Currency {
+                        decimals: 2,
+                        symbol,
+                    },
+                );
+            }
+        });
+        item(ui, "Percent", "12%", NumFmt::Percent { decimals: Some(0) });
+        item(
+            ui,
+            "Scientific",
+            "1.23E+04",
+            NumFmt::Scientific { decimals: 2 },
+        );
+        ui.separator();
+        item(ui, "Date", "2024-05-01", NumFmt::Date);
+        item(ui, "Time", "14:30:00", NumFmt::Time);
+        item(ui, "Date & Time", "2024-05-01 14:30", NumFmt::DateTime);
+        ui.separator();
+        item(ui, "Text", "00042", NumFmt::Text);
+        ui.separator();
+        let single = self.sel.is_single();
+        if ui
+            .add_enabled(!single, egui::Button::new("Merge & Center"))
+            .clicked()
+        {
+            self.merge_selection(true);
+        }
+        if ui
+            .add_enabled(!single, egui::Button::new("Merge Cells"))
+            .clicked()
+        {
+            self.merge_selection(false);
+        }
+        if ui
+            .add_enabled(
+                self.selection_has_merge(),
+                egui::Button::new("Unmerge Cells"),
+            )
+            .clicked()
+        {
+            self.unmerge_selection();
+        }
+        ui.separator();
+        if ui.button("Increase Decimal").clicked() {
+            self.adjust_decimals(1);
+        }
+        if ui.button("Decrease Decimal").clicked() {
+            self.adjust_decimals(-1);
+        }
     }
 }

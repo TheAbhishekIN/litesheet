@@ -6,16 +6,25 @@
 
 mod book;
 mod cell;
+mod chart;
 pub mod filter;
 mod format;
 pub mod refs;
 mod sheet;
+mod style;
 mod value;
 
-pub use book::{Book, CellChange, MetaChange};
-pub use cell::{Cell, NumFmt, Pos, interpret_input, is_formula};
-pub use format::{date_to_serial, fmt_number, format_value, parse_date, serial_to_datetime};
-pub use sheet::{DEFAULT_COL_WIDTH, Sheet, move_rows_edits};
+pub use book::{Book, CellChange, MAX_COLS, MAX_ROWS, MetaChange};
+pub use cell::{Cell, Currency, MAX_DECIMALS, NumFmt, Pos, interpret_input, is_formula};
+pub use chart::{Chart, ChartData, ChartKind, DEFAULT_CHART_SIZE, DataRef, Series};
+pub use format::{
+    date_to_serial, fmt_number, format_number, format_value, parse_date, parse_time,
+    serial_to_datetime,
+};
+pub use sheet::{
+    DEFAULT_COL_WIDTH, Freeze, Merge, Sheet, merge_contains, merges_overlap, move_rows_edits,
+};
+pub use style::{Borders, HAlign, PALETTE, Rgb, Style};
 pub use value::{Value, compare_values, parse_literal};
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ model  ←  io  ←  ai  ←  ui
 | `io` | model, calamine, rust_xlsxwriter, csv | Converting files to and from a `Book` |
 | `ai` | model, reqwest, tokio, keyring | Prompts, the HTTP client, reading replies, key storage |
 | `ui` | everything, egui/eframe | The desktop app |
+| `platform` | objc2 (macOS) | OS integration: files opened from Finder |
 
 Keeping `model` free of UI code means almost all spreadsheet behaviour can be unit-tested quickly, without a window.
 
@@ -27,6 +28,8 @@ model/
 ├── cell.rs     Pos, Cell (raw input + NumFmt), interpret_input()
 ├── value.rs    Value (computed result), parse_literal(), compare_values()
 ├── format.rs   number/date/percent display, Excel date serials
+├── style.rs    Style: font emphasis, colours, alignment, borders
+├── chart.rs    Chart: kind, title, category and series ranges (DataRef), anchor, size
 ├── sheet.rs    Sheet: cells, values, column widths, used extent
 ├── book.rs     Book: sheets, undo/redo, formula-engine bridge
 ├── refs.rs     A1 references, shift_formula() for relative references
@@ -36,9 +39,10 @@ model/
 
 ### Cells and values
 
-Each cell stores two things:
+Each cell stores three things:
 
 - **`Cell`**: what the user typed (`raw`, e.g. `=SUM(A1:A3)`, `42`, `'00042`) and a display format (`NumFmt`).
+- **`Style`**: bold/italic/underline/strike, text and fill colours, alignment, borders.
 - **`Value`**: the computed result (`Number`, `Text`, `Bool`, `Error` or `Empty`).
 
 `Sheet` keeps both in `HashMap<Pos, _>`, so empty cells cost nothing. `Pos` is a zero-based `(row, col)`.
@@ -65,6 +69,10 @@ We keep our own history rather than using the engine's. `Book::apply(label, edit
 
 Undo replays the batch in reverse with the old cells. Paste, fill, sort, clear and format each produce a single entry. Sheet-level operations (add, rename, delete a sheet) are not undoable, and deleting a sheet clears the history, because entries refer to sheets by index.
 
+### Inserting and deleting rows and columns
+
+`Book::structural` moves every cell after the insertion point, rewrites references in all sheets with `refs::adjust_for_structure`, and shifts column widths, all in one history entry. Unlike `shift_formula`, structural adjustment moves absolute (`$`) references too, grows or shrinks ranges, and turns references to deleted cells into `#REF!`.
+
 ### References
 
 `refs::shift_formula` moves the relative parts of A1 references in a formula. It skips string literals, quoted sheet names and function names like `LOG10`, keeps `$` anchors, and turns references pushed off the sheet into `#REF!`. Fill, paste and sort all use it, so `=E2*F2` filled down becomes `=E3*F3`.
@@ -83,6 +91,7 @@ The grid works in view indexes (0..number of visible rows) and converts them to 
 `io::load` and `io::save` choose a format from the file extension:
 
 - `io/csv.rs`: CSV/TSV. Fields go through `interpret_input`, so dates and numbers are recognised. Saving writes the displayed values of the current sheet.
+- `io/xlsx_styles.rs`: calamine doesn't expose formatting, so this reads `styles.xml`, the theme and each worksheet's XML directly (fonts, fills, borders, alignment, number-format codes, theme colours with tints, column widths) and maps Excel number-format codes onto `NumFmt`.
 - `io/xlsx.rs`: reading uses calamine (`.xlsx`, `.xlsm`, `.xls`, `.ods`), taking both cell values and formula text. Writing uses rust_xlsxwriter and stores each formula together with its computed result, so other apps show values without recalculating.
 
 ## `ai`: Bring Your Own Key
@@ -99,6 +108,10 @@ A request runs on a two-thread tokio runtime owned by `App`. The result comes ba
 
 The spreadsheet data sent with each task is built in `ui/ai_panel.rs` (`ai_context`) and capped at 60 KB. The Filter task asks the model for JSON (`{"filters": [...]}`), which `parse_filters` turns into ordinary `ColumnFilter`s. The model never runs anything; it only proposes filters or a formula that the user can see.
 
+## `platform`: opening files from Finder
+
+macOS sends files opened from Finder as an "open documents" Apple Event. winit owns the application delegate (and aborts if it's replaced), so `platform.rs` installs an Apple Event handler instead, in `applicationWillFinishLaunching`, the moment Apple documents for it. That's after AppKit installs its defaults and before it dispatches the document a launch was for. eframe creates the app later, so `platform::install` runs from eframe's `event_loop_builder` hook, before the event loop exists, and listens for the will-finish-launching notification. Opened paths are queued, the UI is woken, and `App` routes them through the same unsaved-changes flow as File → Open. The bundle's `Info.plist` (written by `scripts/bundle-macos.sh`) declares the document types.
+
 ## `ui`: the desktop app
 
 `App` (`ui/app.rs`) holds all UI state: the `Book`, one `ViewState` per sheet, the selection, the active edit, dialogs and the AI panel. Its methods are spread over files by area, each adding an `impl App` block:
@@ -111,6 +124,9 @@ The spreadsheet data sent with each task is built in `ui/ai_panel.rs` (`ai_conte
 | `commands.rs` | Clear, copy/cut/paste, fill, sort, undo/redo, number formats |
 | `keyboard.rs` | Every keyboard shortcut and grid navigation |
 | `menu.rs` | The menu bar |
+| `toolbar.rs` | The formatting toolbar (emphasis, colours, alignment, borders, number format) |
+| `chart.rs` | Drawing charts with the egui painter (axes, legend, six chart types) |
+| `chart_layer.rs` | Charts on the sheet: select, move, resize, delete, and the Insert/Edit Chart window |
 | `formula_bar.rs` | Name box and formula bar |
 | `search.rs` | The find bar |
 | `filtering.rs` | The filter window and applying filters |
@@ -131,6 +147,8 @@ The spreadsheet data sent with each task is built in `ui/ai_panel.rs` (`ai_conte
 ### The virtualized grid
 
 `grid_ui` gives a `ScrollArea` the full content size (every column width plus row count × row height) and uses `show_viewport` to learn which part is visible. Only the visible cells are laid out and painted. Headers are painted last, pinned to the viewport edges, so they stay on top while scrolling.
+
+Frozen panes split the grid into four regions (corner, frozen rows, frozen columns, scrolling area). `Layout::cell_rect` places frozen rows relative to the viewport top and frozen columns relative to its left edge, so they stay pinned. Each region is painted with its own clip rect, scrolling area first, so cells that scroll under a frozen band are hidden.
 
 The whole grid is one interactive area. Mouse positions are mapped to a `Hit` (cell, header, resize handle, filter button) by `hit_test`.
 
@@ -162,3 +180,4 @@ An edit is `App::edit: Option<EditState>`. The cell editor and the formula bar e
 | Change what the AI sees | `ai_context` in `ui/ai_panel.rs` |
 | Add an AI task | `Task` in `ai/mod.rs`, then the UI and handling in `ui/ai_panel.rs` |
 | Change grid drawing | `paint` and `paint_headers` in `ui/grid.rs` |
+| Add a chart type | `ChartKind` in `model/chart.rs`, drawing in `ui/chart.rs`, `excel_chart` in `io/xlsx.rs`, `parse_chart` in `io/xlsx_styles.rs` |

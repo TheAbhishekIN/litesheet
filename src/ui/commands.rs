@@ -5,7 +5,8 @@ use egui::Context;
 
 use super::app::{App, ClipData};
 use super::selection::Selection;
-use crate::model::{self, Cell, Pos, Value, interpret_input, refs};
+use crate::model::refs::{Axis, Structural};
+use crate::model::{self, Borders, Cell, HAlign, Pos, Rgb, Style, Value, interpret_input, refs};
 
 impl App {
     pub(crate) fn sel_positions(&self) -> Vec<Pos> {
@@ -25,14 +26,43 @@ impl App {
             .collect()
     }
 
+    /// Clear contents, keeping formats and styles (like Excel's Delete key).
     pub(crate) fn clear_selection(&mut self) {
+        let s = self.sheet();
         let edits = self
             .sel_positions()
             .into_iter()
-            .filter(|p| self.sheet().cells.contains_key(p))
-            .map(|p| (self.active, p, None))
+            .filter_map(|p| Some((self.active, p, s.cells.get(&p)?.formatting_only())))
             .collect();
         self.book.apply("Clear", edits);
+        self.data_changed();
+    }
+
+    /// Remove number formats and styles, keeping contents.
+    pub(crate) fn clear_formats(&mut self) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter_map(|p| {
+                let cell = s.cells.get(&p)?;
+                Some((self.active, p, Some(Cell::new(cell.raw.clone()))))
+            })
+            .collect();
+        self.book.apply("Clear formats", edits);
+        self.data_changed();
+    }
+
+    /// Remove contents, formats and styles.
+    pub(crate) fn clear_all(&mut self) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter(|p| s.cells.contains_key(p))
+            .map(|p| (self.active, p, None))
+            .collect();
+        self.book.apply("Clear all", edits);
         self.data_changed();
     }
 
@@ -205,6 +235,13 @@ impl App {
         if s.n_rows == 0 || last <= first {
             return;
         }
+        if s.merges
+            .iter()
+            .any(|&((r0, _), (r1, _))| r1 >= first && r0 <= last)
+        {
+            self.error("Can't sort rows that contain merged cells. Unmerge them first.");
+            return;
+        }
         let rows: Vec<u32> = (first..=last).collect();
         let mut order = rows.clone();
         order.sort_by(|&a, &b| {
@@ -274,19 +311,50 @@ impl App {
         self.data_changed();
     }
 
+    /// Apply a number format to every selected cell, including empty ones.
     pub(crate) fn set_format(&mut self, fmt: model::NumFmt) {
+        let s = self.sheet();
         let edits = self
             .sel_positions()
             .into_iter()
             .filter_map(|p| {
-                let cell = self.sheet().cells.get(&p)?;
-                (cell.fmt != fmt).then(|| {
+                let cell = s.cells.get(&p).cloned().unwrap_or_else(|| Cell::new(""));
+                (cell.fmt != fmt).then_some((self.active, p, Some(Cell { fmt, ..cell })))
+            })
+            .collect();
+        self.book.apply("Format", edits);
+        self.data_changed();
+    }
+
+    /// Show one more (`delta > 0`) or one fewer decimal place in selected numbers.
+    pub(crate) fn adjust_decimals(&mut self, delta: i32) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter_map(|p| {
+                let cell = s.cells.get(&p)?;
+                let Value::Number(n) = s.value(p) else {
+                    return None;
+                };
+                if !cell.fmt.adjusts_decimals() {
+                    return None;
+                }
+                let current = cell.fmt.decimals().unwrap_or_else(|| {
+                    // General or automatic percent: count the decimals shown now.
+                    let shown = model::format_number(*n, cell.fmt);
+                    let digits = shown.trim_end_matches('%');
+                    digits.split_once('.').map_or(0, |(_, d)| d.len() as u8)
+                }) as i32;
+                let target = (current + delta).clamp(0, model::MAX_DECIMALS as i32) as u8;
+                let fmt = cell.fmt.with_decimals(target);
+                (fmt != cell.fmt).then(|| {
                     (
                         self.active,
                         p,
                         Some(Cell {
-                            raw: cell.raw.clone(),
                             fmt,
+                            ..cell.clone()
                         }),
                     )
                 })
@@ -295,4 +363,248 @@ impl App {
         self.book.apply("Format", edits);
         self.data_changed();
     }
+
+    /// (first, count) of the rows the selection covers.
+    pub(crate) fn selected_rows(&self) -> (u32, u32) {
+        let ((r0, _), (r1, _)) = self.sel.range();
+        (r0, r1 - r0 + 1)
+    }
+
+    /// (first, count) of the columns the selection covers.
+    pub(crate) fn selected_cols(&self) -> (u32, u32) {
+        let ((_, c0), (_, c1)) = self.sel.range();
+        (c0, c1 - c0 + 1)
+    }
+
+    pub(crate) fn insert_rows(&mut self, below: bool) {
+        let (r, n) = self.selected_rows();
+        self.structural(Axis::Rows, if below { r + n } else { r }, n as i64);
+    }
+
+    pub(crate) fn delete_rows(&mut self) {
+        let (r, n) = self.selected_rows();
+        self.structural(Axis::Rows, r, -(n as i64));
+    }
+
+    pub(crate) fn insert_cols(&mut self, right: bool) {
+        let (c, n) = self.selected_cols();
+        self.structural(Axis::Cols, if right { c + n } else { c }, n as i64);
+    }
+
+    pub(crate) fn delete_cols(&mut self) {
+        let (c, n) = self.selected_cols();
+        self.structural(Axis::Cols, c, -(n as i64));
+    }
+
+    /// Insert or delete rows/columns on the active sheet, then keep filters
+    /// and the selection pointing at the same data.
+    fn structural(&mut self, axis: Axis, at: u32, count: i64) {
+        self.commit_edit((0, 0));
+        let (sheet, n) = (self.active, count.unsigned_abs() as u32);
+        let result = match (axis, count > 0) {
+            (Axis::Rows, true) => self.book.insert_rows(sheet, at, n),
+            (Axis::Rows, false) => self.book.delete_rows(sheet, at, n),
+            (Axis::Cols, true) => self.book.insert_cols(sheet, at, n),
+            (Axis::Cols, false) => self.book.delete_cols(sheet, at, n),
+        };
+        if let Err(e) = result {
+            self.error(e);
+            return;
+        }
+        let name = self.book.sheets[sheet].name.clone();
+        let change = Structural {
+            sheet: &name,
+            axis,
+            at,
+            count,
+        };
+        if axis == Axis::Cols {
+            let filters = std::mem::take(&mut self.views[sheet].filters);
+            self.views[sheet].filters = filters
+                .into_iter()
+                .filter_map(|(c, f)| change.map_index(c).map(|nc| (nc, f)))
+                .collect();
+        }
+        self.clip = None;
+        // Select what was inserted, or the row/column that moved into the gap.
+        let ((r0, c0), (r1, c1)) = self.sel.range();
+        let last = n.saturating_sub(1);
+        self.sel = match (axis, count > 0) {
+            (Axis::Rows, true) => Selection {
+                anchor: (at, c0),
+                cursor: (at + last, c1),
+            },
+            (Axis::Cols, true) => Selection {
+                anchor: (r0, at),
+                cursor: (r1, at + last),
+            },
+            (Axis::Rows, false) => Selection {
+                anchor: (at, c0),
+                cursor: (at, c1),
+            },
+            (Axis::Cols, false) => Selection {
+                anchor: (r0, at),
+                cursor: (r1, at),
+            },
+        };
+        self.data_changed();
+        self.scroll_to_cursor = true;
+    }
+
+    /// Change the style of every selected cell (empty ones included). `f` gets
+    /// each cell's position so edge-aware changes like outlines are possible.
+    pub(crate) fn restyle(&mut self, label: &str, f: impl Fn(Pos, &mut Style)) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter_map(|p| {
+                let mut cell = s.cells.get(&p).cloned().unwrap_or_default();
+                let before = cell.style;
+                f(p, &mut cell.style);
+                (cell.style != before).then(|| (self.active, p, (!cell.is_blank()).then_some(cell)))
+            })
+            .collect();
+        self.book.apply(label, edits);
+        self.data_changed();
+    }
+
+    /// The style of the active cell, which the toolbar reflects.
+    pub(crate) fn cursor_style(&self) -> Style {
+        self.sheet()
+            .cells
+            .get(&self.sel.cursor)
+            .map(|c| c.style)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn toggle_bold(&mut self) {
+        let on = !self.cursor_style().bold;
+        self.restyle(if on { "Bold" } else { "Remove bold" }, |_, s| s.bold = on);
+    }
+
+    pub(crate) fn toggle_italic(&mut self) {
+        let on = !self.cursor_style().italic;
+        self.restyle(if on { "Italic" } else { "Remove italic" }, |_, s| {
+            s.italic = on
+        });
+    }
+
+    pub(crate) fn toggle_underline(&mut self) {
+        let on = !self.cursor_style().underline;
+        self.restyle(if on { "Underline" } else { "Remove underline" }, |_, s| {
+            s.underline = on
+        });
+    }
+
+    pub(crate) fn toggle_strike(&mut self) {
+        let on = !self.cursor_style().strike;
+        self.restyle(
+            if on {
+                "Strikethrough"
+            } else {
+                "Remove strikethrough"
+            },
+            |_, s| s.strike = on,
+        );
+    }
+
+    pub(crate) fn set_text_color(&mut self, color: Option<Rgb>) {
+        self.restyle("Text color", |_, s| s.color = color);
+    }
+
+    pub(crate) fn set_fill(&mut self, fill: Option<Rgb>) {
+        self.restyle("Fill color", |_, s| s.fill = fill);
+    }
+
+    pub(crate) fn set_align(&mut self, align: HAlign) {
+        self.restyle("Align", |_, s| s.align = align);
+    }
+
+    pub(crate) fn set_borders(&mut self, kind: BorderKind) {
+        let ((r0, c0), (r1, c1)) = self.sel.range();
+        self.restyle("Borders", |(r, c), s| {
+            let b = &mut s.borders;
+            match kind {
+                BorderKind::All => *b = Borders::ALL,
+                BorderKind::None => *b = Borders::NONE,
+                BorderKind::Outline => {
+                    b.top |= r == r0;
+                    b.bottom |= r == r1;
+                    b.left |= c == c0;
+                    b.right |= c == c1;
+                }
+                BorderKind::Top => b.top |= r == r0,
+                BorderKind::Bottom => b.bottom |= r == r1,
+                BorderKind::Left => b.left |= c == c0,
+                BorderKind::Right => b.right |= c == c1,
+            }
+        });
+    }
+
+    /// Whether the selection touches a merged range.
+    pub(crate) fn selection_has_merge(&self) -> bool {
+        let range = self.sel.range();
+        self.sheet()
+            .merges
+            .iter()
+            .any(|&m| model::merges_overlap(m, range))
+    }
+
+    pub(crate) fn merge_selection(&mut self, center: bool) {
+        self.commit_edit((0, 0));
+        let range = self.sel.range();
+        if range.0 == range.1 {
+            return;
+        }
+        let dropped = self.book.merge(self.active, range, center);
+        self.sel = Selection {
+            anchor: range.1,
+            cursor: range.0,
+        };
+        self.data_changed();
+        if dropped > 0 {
+            self.notify("Merged: only the upper-left value was kept (⌘Z to undo)");
+        }
+    }
+
+    pub(crate) fn unmerge_selection(&mut self) {
+        self.book.unmerge(self.active, self.sel.range());
+        self.data_changed();
+    }
+
+    /// The toolbar's Merge & Center: merge, or unmerge if already merged.
+    pub(crate) fn toggle_merge_center(&mut self) {
+        if self.selection_has_merge() {
+            self.unmerge_selection();
+        } else {
+            self.merge_selection(true);
+        }
+    }
+
+    /// Freeze the rows above and columns left of the active cell.
+    pub(crate) fn freeze_at_cursor(&mut self) {
+        let (rows, cols) = self.sel.cursor;
+        if rows == 0 && cols == 0 {
+            self.notify("Select the cell below and right of what should stay in view");
+            return;
+        }
+        self.set_freeze(model::Freeze { rows, cols });
+    }
+
+    pub(crate) fn set_freeze(&mut self, freeze: model::Freeze) {
+        self.commit_edit((0, 0));
+        self.book.set_freeze(self.active, freeze);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BorderKind {
+    All,
+    Outline,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    None,
 }

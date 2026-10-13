@@ -44,7 +44,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Open `.xlsx`, `.xlsm`, `.xls`, `.ods`, `.csv` and `.tsv` files
 - Save as `.xlsx` (all sheets) or `.csv` (current sheet), and export any sheet as CSV
 - Formulas, dates, percentages and column widths are kept when you save
-- Open files from the File menu, by dragging them onto the window, or from the command line
+- Open files from Finder (double-click, *Open With*, or drop on the Dock icon), the File menu, by dragging onto the window, or from the command line
 - Unsaved-changes prompt when you create, open or quit; a `•` in the title bar marks unsaved changes
 
 ### Grid and editing
@@ -57,9 +57,18 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Resize columns by dragging; double-click a column border to autofit
 - Cut, copy and paste as tab-separated text, compatible with Excel, Numbers and Google Sheets
 - Fill down (**⌘D**) and fill right (**⌘R**)
+- Insert and delete rows and columns from the Edit menu or by right-clicking a header; formulas, ranges and column widths follow
 - 200-step undo and redo for every change, including paste, fill and sort
 - Live Sum, Average and Count of the selection in the status bar
+- **Freeze panes** (View menu): keep header rows and columns in view while scrolling
 - Light and dark themes, and zoom with **⌘+** / **⌘−**
+
+### Styling
+- Formatting toolbar: **bold**, *italic*, underline and strikethrough (**⌘B**, **⌘I**, **⌘U**), text and fill colours (palette or custom), left/center/right alignment, borders (all, outside, single sides, none), number format and decimals
+- Text on a coloured fill switches between dark and light automatically to stay readable
+- **Merge & Center**, Merge Cells and Unmerge (toolbar or Format menu); a merged range behaves as one cell for selection, arrow keys and editing
+- Styles are kept when you type over a cell, copy, fill or sort; **Delete** keeps them, *Edit → Clear Formats* and *Clear All* remove them
+- Fonts, colours (including Excel theme colours), fills, borders, alignment, number formats, merged cells, frozen panes and column widths are read from `.xlsx` files and written back on save
 
 ### Formulas
 - 400+ Excel-compatible functions, powered by [formualizer](https://crates.io/crates/formualizer): `SUM`, `SUMIFS`, `VLOOKUP`, `INDEX`/`MATCH`, `IF`, `TEXT`, `ROUND` and many more
@@ -78,8 +87,14 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
   - a searchable checklist of the column's values
 - Filtered rows are only hidden, never deleted; arrow keys skip them, and the status bar shows how many rows are visible
 - **Find** (**⌘F**) highlights every match and steps through them; tick "Only matching rows" to show just those rows
-- **Number formats:** General, Percent, Date, and Date & Time
-- Typing `2024-05-01` stores a date and `15%` a percentage; a leading `'` keeps text as text
+- **Number formats:** General, Number (`1,234.50`), Currency (`$ € £ ¥ ₹`), Percent, Scientific, Date, Time, Date & Time and Text, with Increase/Decrease Decimal
+- Typing is recognized: `2024-05-01` is a date, `14:30` or `2:30 PM` a time, `15%` a percentage, `$1,250.50` currency and `1,234` a number with separators; a leading `'` keeps text as text
+- Formats stay on empty cells, so you can format a column before typing; **Delete** clears values but keeps formats
+
+### Charts
+- Column, bar, line, area, pie and scatter charts from *Insert → Chart…* or the toolbar, with a live preview; the data range, series names and categories are detected from the selection
+- Charts float over the sheet: click to select, drag to move, drag the corner to resize, double-click to edit, **Delete** to remove
+- They update as the data changes, follow inserted and deleted rows and columns, and are saved to `.xlsx` as native Excel charts (and Excel charts are read back)
 
 ### AI (Bring Your Own Key)
 - **Generate formulas** from plain English, written for the selected cell using your column headers
@@ -93,6 +108,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 
 | | |
 |---|---|
+| **Charts that update with your data**<br><img src="docs/screenshots/charts.png" alt="A column chart of revenue by region next to a summary table"> | **Formatting toolbar**<br><img src="docs/screenshots/formatting.png" alt="The fill colour palette open over currency-formatted columns in dark mode"> |
 | **Build formulas by pointing at cells**<br><img src="docs/screenshots/formula-editing.png" alt="Editing a SUMIF formula with the referenced range highlighted"> | **Several sheets, linked by formulas**<br><img src="docs/screenshots/multiple-sheets.png" alt="A summary sheet built with SUMIF and COUNTIF"> |
 | **Column filters**<br><img src="docs/screenshots/filtering.png" alt="The filter window for the Region column"> | **Find**<br><img src="docs/screenshots/search.png" alt="Search results highlighted in the grid"> |
 | **AI: generate a formula**<br><img src="docs/screenshots/ai-formula.png" alt="The AI panel generating a SUMIFS formula in dark mode"> | **AI: filter in plain English**<br><img src="docs/screenshots/ai-filter.png" alt="The AI panel turning a request into column filters"> |
@@ -151,7 +167,7 @@ Build a double-clickable `dist/LiteSheet.app` (add `--universal` for Apple Silic
 
 ## Using LiteSheet
 
-Try it on the bundled `samples/sales.xlsx`: an order list plus a summary sheet built with `SUMIF`, `COUNTIF` and `INDEX`/`MATCH`.
+Try it on the bundled `samples/sales.xlsx`: a styled order list with a frozen header row, plus a summary sheet built with `SUMIF`, `COUNTIF` and `INDEX`/`MATCH` and a chart.
 
 ### Keyboard shortcuts
 
@@ -164,6 +180,7 @@ Try it on the bundled `samples/sales.xlsx`: an order list plus a summary sheet b
 | Commit and move down / right | Return / Tab (⇧ to reverse) |
 | Cancel edit | Esc |
 | Clear selection | Delete |
+| Bold / Italic / Underline | ⌘B / ⌘I / ⌘U |
 | Fill down / right | ⌘D / ⌘R |
 | Select all | ⌘A |
 | Jump to the edge of the data | ⌘ + arrow (⇧ to extend) |
@@ -222,12 +239,14 @@ Measured on Apple Silicon with a release build and a 200,000 × 5 sheet. Reprodu
 
 LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 
-- [ ] Insert and delete rows and columns
-- [ ] Cell styling (bold, colours, borders, alignment); styles in imported files are currently dropped on save
+- [x] Insert and delete rows and columns
+- [x] Cell styling (bold, colours, borders, alignment), kept when opening and saving `.xlsx`
 - [x] Rewrite formulas when a sheet is renamed
-- [ ] Open files from Finder (double-click, *Open With*)
-- [ ] Freeze panes, merged cells, more number formats
-- [ ] Charts
+- [x] Open files from Finder (double-click, *Open With*, drop on the Dock icon)
+- [x] More number formats (number, currency, scientific, time, text)
+- [x] Merged cells
+- [x] Freeze panes
+- [x] Charts
 - [ ] Tested Linux and Windows builds
 
 Have an idea? [Open a feature request](https://github.com/TheAbhishekIN/litesheet/issues/new/choose).

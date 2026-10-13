@@ -18,9 +18,7 @@ use crate::model::{self, Book, Cell, Pos};
 pub const CELL_EDITOR_ID: &str = "cell_editor";
 pub const BAR_EDITOR_ID: &str = "formula_bar_editor";
 pub const SEARCH_ID: &str = "search_box";
-/// Excel's limits.
-pub const MAX_ROWS: u32 = 1_048_576;
-pub const MAX_COLS: u32 = 16_384;
+pub use crate::model::{MAX_COLS, MAX_ROWS};
 
 pub struct EditState {
     pub pos: Pos,
@@ -42,10 +40,12 @@ pub(crate) struct ClipData {
     pub(crate) cut: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Pending {
     New,
     Open,
+    /// Open this file (from Finder or a drop), once unsaved changes are dealt with.
+    OpenFile(PathBuf),
     Close,
 }
 
@@ -70,6 +70,10 @@ pub struct App {
     pub scroll_to_cursor: bool,
     pub filter_buttons: bool,
     pub filter_popup: Option<FilterPopup>,
+    /// The chart selected on the sheet (index into the active sheet's charts).
+    pub selected_chart: Option<usize>,
+    pub(crate) chart_drag: Option<super::chart_layer::ChartDrag>,
+    pub(crate) chart_dialog: Option<super::chart_layer::ChartDialog>,
     pub context_target: Option<(Option<u32>, Option<u32>)>,
     pub resizing: Option<(u32, f32, f32)>,
     /// Bumped on every data change; used to cache selection stats.
@@ -97,6 +101,7 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> Self {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = true);
+        crate::platform::set_repaint_context(&cc.egui_ctx);
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -112,6 +117,9 @@ impl App {
             scroll_to_cursor: false,
             filter_buttons: false,
             filter_popup: None,
+            selected_chart: None,
+            chart_drag: None,
+            chart_dialog: None,
             context_target: None,
             resizing: None,
             data_version: 0,
@@ -168,6 +176,8 @@ impl App {
         self.sel = Selection::single((0, 0));
         self.edit = None;
         self.filter_popup = None;
+        self.selected_chart = None;
+        self.chart_dialog = None;
         self.clip = None;
         self.data_version += 1;
         self.scroll_to_cursor = true;
@@ -181,6 +191,7 @@ impl App {
         self.active = idx;
         self.sel = Selection::single((0, 0));
         self.filter_popup = None;
+        self.selected_chart = None;
         self.data_changed();
         self.scroll_to_cursor = true;
     }
@@ -225,7 +236,12 @@ impl App {
 
     /// Move the cursor by (rows, cols) in view space.
     pub(crate) fn move_cursor(&mut self, dr: i64, dc: i64, extend: bool) {
-        let (r, c) = self.sel.cursor;
+        // Step off a merged cell from its far edge, so arrows skip over it.
+        let (mut r, mut c) = self.sel.cursor;
+        if let Some(((r0, c0), (r1, c1))) = self.sheet().merge_at((r, c)) {
+            r = if dr > 0 { r1 } else { r0 };
+            c = if dc > 0 { c1 } else { c0 };
+        }
         let vi = self.view_index(r).unwrap_or(0) as i64;
         let max_vi = self.view_rows().saturating_sub(1) as i64
             + if self.view().is_filtered() { 0 } else { 1000 };
@@ -241,7 +257,50 @@ impl App {
         } else {
             self.sel = Selection::single(pos);
         }
+        self.snap_to_merges();
         self.scroll_to_cursor = true;
+    }
+
+    /// Grow the selection over any merged range it partly covers, and keep
+    /// the active cell on a merge's top-left cell (where its value lives).
+    pub(crate) fn snap_to_merges(&mut self) {
+        let merges = &self.book.sheets[self.active].merges;
+        if merges.is_empty() {
+            return;
+        }
+        let (mut a, mut b) = self.sel.range();
+        loop {
+            let mut grew = false;
+            for &m in merges {
+                if model::merges_overlap(m, (a, b)) {
+                    let (na, nb) = (
+                        (a.0.min(m.0.0), a.1.min(m.0.1)),
+                        (b.0.max(m.1.0), b.1.max(m.1.1)),
+                    );
+                    grew |= (na, nb) != (a, b);
+                    (a, b) = (na, nb);
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        let mut cursor = self.sel.cursor;
+        if let Some(m) = merges.iter().find(|&&m| model::merge_contains(m, cursor)) {
+            cursor = m.0;
+        }
+        // The cursor must sit on an edge of the range for (anchor, cursor) to describe it.
+        if cursor.0 != a.0 && cursor.0 != b.0 {
+            cursor.0 = a.0;
+        }
+        if cursor.1 != a.1 && cursor.1 != b.1 {
+            cursor.1 = a.1;
+        }
+        let anchor = (
+            if cursor.0 == a.0 { b.0 } else { a.0 },
+            if cursor.1 == a.1 { b.1 } else { a.1 },
+        );
+        self.sel = Selection { anchor, cursor };
     }
 
     pub(crate) fn update_title(&mut self, ctx: &Context) {
@@ -274,17 +333,23 @@ impl eframe::App for App {
             self.commit_edit((0, 0));
             self.pending = Some(Pending::Close);
         }
-        if let Some(files) =
-            ctx.input(|i| (!i.raw.dropped_files.is_empty()).then(|| i.raw.dropped_files.clone()))
-            && let Some(path) = files
-                .first()
+        // Files dropped on the window or opened from Finder.
+        let dropped = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
                 .map(|f| f.path().to_path_buf())
                 .filter(|p| !p.as_os_str().is_empty())
-        {
-            if self.book.dirty {
-                self.error("Save or discard your changes before opening another file");
-            } else {
-                self.start_load(path, &ctx);
+                .collect::<Vec<_>>()
+        });
+        let mut incoming = crate::platform::take_opened_files();
+        incoming.extend(dropped);
+        if let Some(path) = incoming.first().cloned() {
+            if incoming.len() > 1 {
+                self.notify("LiteSheet opens one workbook at a time; opening the first");
+            }
+            if self.loading.is_none() {
+                self.request(Pending::OpenFile(path), &ctx);
             }
         }
 
@@ -293,6 +358,11 @@ impl eframe::App for App {
         }
 
         egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui));
+        egui::Panel::top("toolbar").show(ui, |ui| {
+            ui.add_space(3.0);
+            self.toolbar(ui);
+            ui.add_space(3.0);
+        });
         egui::Panel::top("formula_bar").show(ui, |ui| {
             ui.add_space(3.0);
             self.formula_bar(ui);
@@ -332,6 +402,7 @@ impl eframe::App for App {
             });
 
         self.filter_window(&ctx);
+        self.chart_window(&ctx);
         self.confirm_dialog(&ctx);
         self.update_title(&ctx);
     }

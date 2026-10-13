@@ -24,6 +24,9 @@ calamine = "0.36.1"
 rust_xlsxwriter = "0.99.1"
 csv = "1.4.0"
 chrono = "0.4.45"
+# Reading cell styles from .xlsx (calamine doesn't expose them)
+quick-xml = "0.42.0"
+zip = { version = "9.0.2", default-features = false, features = ["deflate"] }
 
 # AI (Bring Your Own Key)
 reqwest = { version = "0.13.5", features = ["json"] }
@@ -34,6 +37,12 @@ keyring = "4.2.0"
 anyhow = "1.0.104"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+
+# Opening files from Finder (Apple Event handler)
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSNotification", "NSObject", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }

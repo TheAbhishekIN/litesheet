@@ -4,6 +4,7 @@
 
 mod csv;
 mod xlsx;
+mod xlsx_styles;
 
 use std::path::Path;
 
@@ -45,6 +46,186 @@ mod tests {
     use super::*;
 
     #[test]
+    fn styles_formats_and_widths_roundtrip() {
+        use crate::model::{Borders, Cell, Currency, HAlign, NumFmt, Rgb, Style};
+        let dir = std::env::temp_dir().join(format!("litesheet-style-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut b = Book::new_blank();
+        let fancy = Style {
+            bold: true,
+            italic: true,
+            underline: true,
+            strike: true,
+            color: Some(Rgb(192, 0, 0)),
+            fill: Some(Rgb(255, 242, 204)),
+            align: HAlign::Center,
+            borders: Borders {
+                top: true,
+                bottom: true,
+                left: false,
+                right: true,
+            },
+        };
+        let euro = NumFmt::Currency {
+            decimals: 2,
+            symbol: Currency::Euro,
+        };
+        b.apply(
+            "s",
+            vec![
+                (
+                    0,
+                    (0, 0),
+                    Some(Cell {
+                        raw: "Title".into(),
+                        fmt: NumFmt::General,
+                        style: fancy,
+                    }),
+                ),
+                (
+                    0,
+                    (1, 0),
+                    Some(Cell {
+                        raw: "1234.5".into(),
+                        fmt: euro,
+                        style: Style::default(),
+                    }),
+                ),
+                (
+                    0,
+                    (2, 0),
+                    Some(Cell {
+                        raw: "00042".into(),
+                        fmt: NumFmt::Text,
+                        style: Style::default(),
+                    }),
+                ),
+                (
+                    0,
+                    (3, 0),
+                    Some(Cell {
+                        raw: "0.25".into(),
+                        fmt: NumFmt::Percent { decimals: Some(1) },
+                        style: Style::default(),
+                    }),
+                ),
+                (
+                    0,
+                    (4, 0),
+                    Some(Cell {
+                        raw: "0.5".into(),
+                        fmt: NumFmt::Time,
+                        style: Style::default(),
+                    }),
+                ),
+                // Formatting on an empty cell survives too.
+                (
+                    0,
+                    (5, 1),
+                    Some(Cell {
+                        raw: String::new(),
+                        fmt: NumFmt::General,
+                        style: Style {
+                            fill: Some(Rgb(68, 114, 196)),
+                            ..Style::default()
+                        },
+                    }),
+                ),
+            ],
+        );
+        b.sheets[0].col_widths.insert(0, 180.0);
+        b.merge(0, ((0, 0), (0, 3)), false);
+        b.set_input(0, (7, 0), "=6*7");
+        b.merge(0, ((7, 0), (8, 1)), false);
+        b.set_freeze(0, crate::model::Freeze { rows: 1, cols: 2 });
+        let path = dir.join("styles.xlsx");
+        save(&b, 0, &path).unwrap();
+
+        let l = load(&path).unwrap();
+        let s = &l.sheets[0];
+        assert_eq!(s.cells[&(0, 0)].style, fancy);
+        assert_eq!(s.cells[&(1, 0)].fmt, euro);
+        assert_eq!(s.display((1, 0)), "€1,234.50");
+        assert_eq!(s.cells[&(2, 0)].fmt, NumFmt::Text);
+        assert_eq!(s.display((2, 0)), "00042");
+        assert_eq!(s.display((3, 0)), "25.0%");
+        assert_eq!(s.display((4, 0)), "12:00:00");
+        assert_eq!(s.cells[&(5, 1)].style.fill, Some(Rgb(68, 114, 196)));
+        assert_eq!(s.freeze, crate::model::Freeze { rows: 1, cols: 2 });
+        assert_eq!(s.merges.len(), 2);
+        assert!(s.merges.contains(&((0, 0), (0, 3))));
+        assert_eq!(s.display((0, 0)), "Title");
+        assert_eq!(
+            s.cells[&(7, 0)].raw,
+            "=6*7",
+            "the merged top-left keeps its formula"
+        );
+        assert_eq!(s.display((7, 0)), "42");
+        let w = s.col_widths[&0];
+        assert!((w - 180.0).abs() < 8.0, "width {w}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn charts_roundtrip() {
+        use crate::model::{Chart, ChartKind, DataRef};
+        let dir = std::env::temp_dir().join(format!("litesheet-chart-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut b = Book::new_blank();
+        let rows = [
+            ["Month", "Sales", "Costs"],
+            ["Jan", "10", "4"],
+            ["Feb", "12", "5"],
+            ["Mar", "9", "6"],
+        ];
+        for (r, row) in rows.iter().enumerate() {
+            for (c, v) in row.iter().enumerate() {
+                b.set_input(0, (r as u32, c as u32), v);
+            }
+        }
+        let mut column =
+            Chart::from_block(&b.sheets[0], (0, 0), (3, 2), ChartKind::Column).unwrap();
+        column.title = "Sales & costs".into();
+        let mut pie = Chart::from_block(&b.sheets[0], (0, 0), (3, 1), ChartKind::Pie).unwrap();
+        pie.anchor = (20, 1);
+        pie.size = (320.0, 240.0);
+        b.set_charts(0, vec![column.clone(), pie], "charts");
+        let path = dir.join("charts.xlsx");
+        save(&b, 0, &path).unwrap();
+
+        let l = load(&path).unwrap();
+        let charts = &l.sheets[0].charts;
+        assert_eq!(charts.len(), 2);
+        let c = charts.iter().find(|c| c.kind == ChartKind::Column).unwrap();
+        assert_eq!(c.title, "Sales & costs");
+        assert_eq!(c.anchor, column.anchor);
+        assert_eq!(c.categories, Some(DataRef::new("Sheet1", (1, 0), (3, 0))));
+        assert_eq!(c.series.len(), 2);
+        assert_eq!(c.series[1].values, DataRef::new("Sheet1", (1, 2), (3, 2)));
+        assert_eq!(
+            c.series[0].name_ref,
+            Some(DataRef::new("Sheet1", (0, 1), (0, 1)))
+        );
+        assert!(
+            (c.size.0 - 480.0).abs() < 2.0 && (c.size.1 - 288.0).abs() < 2.0,
+            "{:?}",
+            c.size
+        );
+        let p = charts.iter().find(|c| c.kind == ChartKind::Pie).unwrap();
+        assert_eq!(p.anchor, (20, 1));
+        assert!(
+            (p.size.0 - 320.0).abs() < 2.0 && (p.size.1 - 240.0).abs() < 2.0,
+            "{:?}",
+            p.size
+        );
+        assert_eq!(
+            p.data(&l).series[0].1,
+            vec![Some(10.0), Some(12.0), Some(9.0)]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn xlsx_and_csv_roundtrip() {
         let dir = std::env::temp_dir().join(format!("litesheet-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -72,6 +253,49 @@ mod tests {
         assert_eq!(s.display((3, 1)), "3.25");
         assert_eq!(s.display((4, 1)), "2024-05-01");
         assert_eq!(l.sheets[1].display((0, 0)), "6.5");
+
+        // Number formats are written as Excel format codes.
+        let mut f = Book::new_blank();
+        let cur = crate::model::NumFmt::Currency {
+            decimals: 2,
+            symbol: crate::model::Currency::Euro,
+        };
+        f.apply(
+            "f",
+            vec![(
+                0,
+                (0, 0),
+                Some(crate::model::Cell {
+                    raw: "12.5".into(),
+                    fmt: cur,
+                    ..Default::default()
+                }),
+            )],
+        );
+        let sci = crate::model::NumFmt::Scientific { decimals: 1 };
+        f.apply(
+            "f",
+            vec![(
+                0,
+                (1, 0),
+                Some(crate::model::Cell {
+                    raw: String::new(),
+                    fmt: sci,
+                    ..Default::default()
+                }),
+            )],
+        );
+        let fx = dir.join("formats.xlsx");
+        save(&f, 0, &fx).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&fx).unwrap()).unwrap();
+        let mut styles = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("xl/styles.xml").unwrap(), &mut styles)
+            .unwrap();
+        assert!(
+            styles.contains("formatCode=\"&quot;€&quot;#,##0.00\""),
+            "{styles}"
+        );
+        assert!(styles.contains("formatCode=\"0.0E+00\""), "{styles}");
 
         let csv = dir.join("t.csv");
         save(&b, 0, &csv).unwrap();
