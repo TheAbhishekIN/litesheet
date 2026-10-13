@@ -151,3 +151,58 @@ fn ai_panel_renders() {
     h.run_steps(2);
     shot(&mut h, "08-ai-panel");
 }
+
+fn right_click(h: &mut Harness<'_, App>, p: egui::Pos2) {
+    h.event(Event::PointerMoved(p));
+    h.event(Event::PointerButton {
+        pos: p,
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    h.step();
+    h.event(Event::PointerButton {
+        pos: p,
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run_steps(2);
+}
+
+#[test]
+fn insert_and_delete_rows_from_context_menu() {
+    let mut h = harness(SALES_CSV);
+    click(&mut h, cell(9, 5), Modifiers::NONE);
+    type_text(&mut h, "=SUM(F2:F9)");
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(display(&h, 9, 5), "346.23");
+
+    // Right-click the header of row 4 and insert a row above it.
+    right_click(&mut h, pos2(25.0, cell(3, 0).y));
+    assert_eq!(h.state().sel.name(), "A4:G4");
+    shot(&mut h, "row-context-menu");
+    h.get_by_label("Insert Row Above").click();
+    h.run_steps(2);
+    assert_eq!(display(&h, 3, 0), "");
+    assert_eq!(display(&h, 4, 0), "1003");
+    assert_eq!(h.state().sheet().cells[&(10, 5)].raw, "=SUM(F2:F10)");
+    assert_eq!(display(&h, 10, 5), "346.23");
+
+    // Delete it again from the column-and-row menu on a cell.
+    right_click(&mut h, cell(3, 2));
+    h.get_by_label("Delete Row").click();
+    h.run_steps(2);
+    assert_eq!(display(&h, 3, 0), "1003");
+    assert_eq!(h.state().sheet().cells[&(9, 5)].raw, "=SUM(F2:F9)");
+
+    // Insert a column left of B from its header; Date moves to C.
+    right_click(&mut h, pos2(200.0, 67.0));
+    assert_eq!(h.state().sel.name(), "B1:B10");
+    h.get_by_label("Insert Column Left").click();
+    h.run_steps(2);
+    assert_eq!(display(&h, 0, 2), "Date");
+    assert_eq!(h.state().sheet().cells[&(9, 6)].raw, "=SUM(G2:G9)");
+    key(&mut h, Key::Z, Modifiers::COMMAND);
+    assert_eq!(display(&h, 0, 1), "Date");
+}

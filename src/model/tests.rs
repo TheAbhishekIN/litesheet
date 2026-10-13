@@ -87,3 +87,54 @@ fn rename_sheet_updates_formulas_and_undoes() {
     b.set_input(data, (0, 0), "10");
     assert_eq!(b.sheets[0].display((0, 0)), "30");
 }
+
+#[test]
+fn insert_and_delete_rows_and_columns() {
+    let mut b = Book::new_blank();
+    let other = b.add_sheet("Other");
+    for (r, v) in ["1", "2", "3", "4"].iter().enumerate() {
+        b.set_input(0, (r as u32, 0), v);
+    }
+    b.set_input(0, (4, 0), "=SUM(A1:A4)");
+    b.set_input(0, (0, 1), "=A4*10");
+    b.set_input(other, (0, 0), "=Sheet1!A3+Sheet1!A5");
+    b.sheets[0].col_widths.insert(1, 150.0);
+
+    // Two rows above row 3: values move down, formulas follow.
+    b.insert_rows(0, 2, 2).unwrap();
+    assert_eq!(b.sheets[0].display((6, 0)), "10");
+    assert_eq!(b.sheets[0].cells[&(6, 0)].raw, "=SUM(A1:A6)");
+    assert_eq!(b.sheets[0].cells[&(0, 1)].raw, "=A6*10");
+    assert_eq!(b.sheets[other].cells[&(0, 0)].raw, "=Sheet1!A5+Sheet1!A7");
+    assert_eq!(b.sheets[other].display((0, 0)), "13");
+    assert_eq!(b.sheets[0].display((2, 0)), "");
+    assert_eq!(b.undo_label(), Some("Insert 2 rows"));
+
+    // Undo puts everything back.
+    b.undo();
+    assert_eq!(b.sheets[0].cells[&(4, 0)].raw, "=SUM(A1:A4)");
+    assert_eq!(b.sheets[other].display((0, 0)), "13");
+    b.redo();
+    assert_eq!(b.sheets[0].display((6, 0)), "10");
+    b.undo();
+
+    // Delete row 3 (value 3): the sum shrinks, a direct reference breaks.
+    b.delete_rows(0, 2, 1).unwrap();
+    assert_eq!(b.sheets[0].cells[&(3, 0)].raw, "=SUM(A1:A3)");
+    assert_eq!(b.sheets[0].display((3, 0)), "7");
+    assert_eq!(b.sheets[other].cells[&(0, 0)].raw, "=#REF!+Sheet1!A4");
+    b.undo();
+
+    // Insert a column before B: B's width moves to C.
+    b.insert_cols(0, 1, 1).unwrap();
+    assert_eq!(b.sheets[0].cells[&(0, 2)].raw, "=A4*10");
+    assert_eq!(b.sheets[0].col_widths.get(&2), Some(&150.0));
+    assert_eq!(b.sheets[0].col_widths.get(&1), None);
+    b.undo();
+    assert_eq!(b.sheets[0].col_widths.get(&1), Some(&150.0));
+
+    // Delete column A: formulas pointing at it break.
+    b.delete_cols(0, 0, 1).unwrap();
+    assert_eq!(b.sheets[0].cells[&(0, 0)].raw, "=#REF!*10");
+    assert!(matches!(b.sheets[0].value((0, 0)), Value::Error(_)));
+}

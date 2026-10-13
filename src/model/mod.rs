@@ -12,7 +12,7 @@ pub mod refs;
 mod sheet;
 mod value;
 
-pub use book::{Book, CellChange, MetaChange};
+pub use book::{Book, CellChange, MAX_COLS, MAX_ROWS, MetaChange};
 pub use cell::{Cell, NumFmt, Pos, interpret_input, is_formula};
 pub use format::{date_to_serial, fmt_number, format_value, parse_date, serial_to_datetime};
 pub use sheet::{DEFAULT_COL_WIDTH, Sheet, move_rows_edits};

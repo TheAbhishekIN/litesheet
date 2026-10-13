@@ -6,6 +6,7 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ### Added
 
+- Insert and delete rows and columns (Edit menu and right-click on headers or cells). References in every sheet are adjusted the way Excel does it: ranges grow and shrink, references to deleted cells become `#REF!`, and column widths move with their columns
 - Renaming a sheet updates every formula that refers to it, and the rename can be undone
 
 ### Changed

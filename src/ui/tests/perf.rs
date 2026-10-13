@@ -54,6 +54,13 @@ fn perf_big_file() {
         t.elapsed() / 30
     );
     let t = Instant::now();
+    h.state_mut().book.insert_rows(0, 1, 1).unwrap();
+    eprintln!("insert a row at the top of 200k rows: {:?}", t.elapsed());
+    let t = Instant::now();
+    h.state_mut().book.undo();
+    eprintln!("undo that insert: {:?}", t.elapsed());
+
+    let t = Instant::now();
     h.state_mut().sort_by(3, true);
     eprintln!("sort 200k rows: {:?}", t.elapsed());
     let t = Instant::now();

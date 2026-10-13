@@ -291,10 +291,31 @@ impl App {
             && let Some(p) = pointer
         {
             self.context_target = match self.hit_test(l, p) {
+                // Keep the selection only if it already spans whole columns/rows
+                // that include the clicked header; otherwise select that one.
                 Hit::ColHeader(c) | Hit::FilterButton(c) | Hit::ColResize(c) => {
+                    let ((r0, c0), (r1, c1)) = self.sel.range();
+                    let whole_cols = r0 == 0 && r1 >= max_row;
+                    if !(whole_cols && (c0..=c1).contains(&c)) {
+                        self.sel = Selection {
+                            anchor: (0, c),
+                            cursor: (max_row, c),
+                        };
+                    }
                     Some((Some(c), None))
                 }
-                Hit::RowHeader(r) => Some((None, Some(r))),
+                Hit::RowHeader(r) => {
+                    let ((r0, c0), (r1, c1)) = self.sel.range();
+                    let last_col = self.sheet().n_cols.max(1) - 1;
+                    let whole_rows = c0 == 0 && c1 >= last_col;
+                    if !(whole_rows && (r0..=r1).contains(&r)) {
+                        self.sel = Selection {
+                            anchor: (r, 0),
+                            cursor: (r, last_col),
+                        };
+                    }
+                    Some((None, Some(r)))
+                }
                 Hit::Cell(r, c) => {
                     if !self.sel.contains((r, c)) {
                         self.sel = Selection::single((r, c));
@@ -745,6 +766,7 @@ impl App {
             }
             ui.separator();
         }
+        self.structural_menu(ui, col.is_some(), row.is_some());
         if let Some(c) = col {
             if ui.button("Sort A to Z").clicked() {
                 self.sort_by(c, true);
@@ -789,6 +811,52 @@ impl App {
             self.ai.task = crate::ai::Task::Explain;
             self.ai.focus_prompt = true;
             ui.close();
+        }
+    }
+
+    /// Insert/delete items for the context menu: row headers get row items,
+    /// column headers column items, and cells both.
+    fn structural_menu(&mut self, ui: &mut egui::Ui, cols: bool, rows: bool) {
+        let (_, nr) = self.selected_rows();
+        let (_, nc) = self.selected_cols();
+        let plural = |n: u32, one: &str, many: &str| {
+            if n == 1 {
+                one.to_string()
+            } else {
+                format!("{n} {many}")
+            }
+        };
+        let (row_text, col_text) = (plural(nr, "Row", "Rows"), plural(nc, "Column", "Columns"));
+        if rows {
+            if ui.button(format!("Insert {row_text} Above")).clicked() {
+                self.insert_rows(false);
+                ui.close();
+            }
+            if ui.button(format!("Insert {row_text} Below")).clicked() {
+                self.insert_rows(true);
+                ui.close();
+            }
+        }
+        if cols {
+            if ui.button(format!("Insert {col_text} Left")).clicked() {
+                self.insert_cols(false);
+                ui.close();
+            }
+            if ui.button(format!("Insert {col_text} Right")).clicked() {
+                self.insert_cols(true);
+                ui.close();
+            }
+        }
+        if rows && ui.button(format!("Delete {row_text}")).clicked() {
+            self.delete_rows();
+            ui.close();
+        }
+        if cols && ui.button(format!("Delete {col_text}")).clicked() {
+            self.delete_cols();
+            ui.close();
+        }
+        if rows || cols {
+            ui.separator();
         }
     }
 }

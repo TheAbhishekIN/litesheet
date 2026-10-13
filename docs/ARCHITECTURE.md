@@ -65,6 +65,10 @@ We keep our own history rather than using the engine's. `Book::apply(label, edit
 
 Undo replays the batch in reverse with the old cells. Paste, fill, sort, clear and format each produce a single entry. Sheet-level operations (add, rename, delete a sheet) are not undoable, and deleting a sheet clears the history, because entries refer to sheets by index.
 
+### Inserting and deleting rows and columns
+
+`Book::structural` moves every cell after the insertion point, rewrites references in all sheets with `refs::adjust_for_structure`, and shifts column widths, all in one history entry. Unlike `shift_formula`, structural adjustment moves absolute (`$`) references too, grows or shrinks ranges, and turns references to deleted cells into `#REF!`.
+
 ### References
 
 `refs::shift_formula` moves the relative parts of A1 references in a formula. It skips string literals, quoted sheet names and function names like `LOG10`, keeps `$` anchors, and turns references pushed off the sheet into `#REF!`. Fill, paste and sort all use it, so `=E2*F2` filled down becomes `=E3*F3`.
