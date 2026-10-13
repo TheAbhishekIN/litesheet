@@ -116,6 +116,101 @@ pub fn shift_formula(formula: &str, dr: i64, dc: i64) -> String {
     out
 }
 
+/// The sheet name as it must appear in a formula: quoted (`'My Sheet'`) when
+/// it isn't a plain identifier or could be mistaken for a cell reference.
+pub fn quote_sheet(name: &str) -> String {
+    let plain = name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        && parse_cell(name).is_none()
+        && !name.eq_ignore_ascii_case("true")
+        && !name.eq_ignore_ascii_case("false");
+    if plain {
+        name.to_string()
+    } else {
+        format!("'{}'", name.replace('\'', "''"))
+    }
+}
+
+/// Point every reference to sheet `old` in `formula` at sheet `new` instead
+/// (`Old!A1`, `'Old'!A1:B2`, …). Sheet names match case-insensitively, as in Excel.
+pub fn rename_sheet_refs(formula: &str, old: &str, new: &str) -> String {
+    if !formula.starts_with('=') {
+        return formula.to_string();
+    }
+    let chars: Vec<char> = formula.chars().collect();
+    let replacement = quote_sheet(new);
+    let mut out = String::with_capacity(formula.len() + 8);
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            // String literal: copy verbatim.
+            out.push(c);
+            i += 1;
+            while i < chars.len() {
+                out.push(chars[i]);
+                i += 1;
+                if chars[i - 1] == '"' {
+                    if chars.get(i) == Some(&'"') {
+                        out.push('"');
+                        i += 1;
+                        continue;
+                    }
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '\'' {
+            // Quoted sheet name: read up to the closing quote ('' escapes a quote).
+            let start = i;
+            let mut name = String::new();
+            i += 1;
+            while i < chars.len() {
+                if chars[i] == '\'' {
+                    if chars.get(i + 1) == Some(&'\'') {
+                        name.push('\'');
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                    break;
+                }
+                name.push(chars[i]);
+                i += 1;
+            }
+            if chars.get(i) == Some(&'!') && name.eq_ignore_ascii_case(old) {
+                out.push_str(&replacement);
+            } else {
+                out.extend(&chars[start..i]);
+            }
+            continue;
+        }
+        let prev_is_word = i > 0 && is_word(chars[i - 1]);
+        if !prev_is_word && (c.is_alphabetic() || c == '_') {
+            let start = i;
+            while i < chars.len() && (is_word(chars[i]) || chars[i].is_alphanumeric()) {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            if chars.get(i) == Some(&'!') && word.eq_ignore_ascii_case(old) {
+                out.push_str(&replacement);
+            } else {
+                out.push_str(&word);
+            }
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 fn is_word(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.'
 }
@@ -198,5 +293,39 @@ mod tests {
         assert_eq!(shift_formula("='My Sheet'!B2*2", 0, 1), "='My Sheet'!C2*2");
         assert_eq!(shift_formula("=A1", -1, 0), "=#REF!");
         assert_eq!(shift_formula("hello A1", 1, 0), "hello A1");
+    }
+
+    #[test]
+    fn renaming_sheets() {
+        assert_eq!(quote_sheet("Data"), "Data");
+        assert_eq!(quote_sheet("My Data"), "'My Data'");
+        assert_eq!(quote_sheet("2024"), "'2024'");
+        assert_eq!(quote_sheet("AB12"), "'AB12'");
+        assert_eq!(quote_sheet("Bob's"), "'Bob''s'");
+        assert_eq!(
+            rename_sheet_refs("=Data!A1*2", "Data", "Inputs"),
+            "=Inputs!A1*2"
+        );
+        assert_eq!(
+            rename_sheet_refs("=SUM(data!A1:A9)", "Data", "My Inputs"),
+            "=SUM('My Inputs'!A1:A9)"
+        );
+        assert_eq!(
+            rename_sheet_refs("='My Data'!B2+Other!B2", "my data", "D"),
+            "=D!B2+Other!B2"
+        );
+        assert_eq!(
+            rename_sheet_refs("=\"Data!A1\"&Data!A1", "Data", "X"),
+            "=\"Data!A1\"&X!A1"
+        );
+        assert_eq!(
+            rename_sheet_refs("=DataSet!A1+Data2!A1", "Data", "X"),
+            "=DataSet!A1+Data2!A1"
+        );
+        assert_eq!(
+            rename_sheet_refs("='Bob''s'!A1", "Bob's", "Al's"),
+            "='Al''s'!A1"
+        );
+        assert_eq!(rename_sheet_refs("=Data!A:A", "Data", "X"), "=X!A:A");
     }
 }
