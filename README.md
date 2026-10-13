@@ -109,11 +109,15 @@ LiteSheet currently targets **macOS 11 or later** on Apple Silicon and Intel.
 **[⬇ Download LiteSheet for Mac](https://github.com/TheAbhishekIN/litesheet/releases/latest/download/LiteSheet-macos.zip)**: one universal app for Apple Silicon and Intel.
 
 1. Unzip it and drag **LiteSheet.app** into Applications.
-2. The first time, right-click the app and choose **Open**, then **Open** again. LiteSheet isn't notarized by Apple yet, so macOS asks once.
-3. If macOS says the app "is damaged", clear the download quarantine flag:
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/LiteSheet.app
-   ```
+2. Open it. LiteSheet isn't notarized by Apple yet, so the first time macOS says *"LiteSheet" Not Opened*. Click **Done**, then allow it once using either option:
+   - **System Settings → Privacy & Security**: scroll down to *"LiteSheet" was blocked…*, click **Open Anyway**, then confirm with your password or Touch ID; or
+   - run this in Terminal:
+     ```bash
+     xattr -dr com.apple.quarantine /Applications/LiteSheet.app
+     ```
+3. From then on LiteSheet opens normally.
+
+> On macOS 14 and earlier you can also right-click the app and choose **Open**. That shortcut no longer works on macOS 15 and later.
 
 Older versions are on the [Releases page](https://github.com/TheAbhishekIN/litesheet/releases).
 

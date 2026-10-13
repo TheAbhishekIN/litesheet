@@ -23,8 +23,48 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Signing and notarization switch on when the Apple secrets are set
+      # (see CONTRIBUTING.md, "Releasing"). Without them the app is ad-hoc
+      # signed and macOS asks users to approve it on first launch.
+      - name: Import Developer ID certificate
+        id: cert
+        env:
+          CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "$CERTIFICATE_P12" ] || [ -z "$SIGN_IDENTITY" ]; then
+            echo "No signing secrets: building an ad-hoc signed app."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "identity=$SIGN_IDENTITY" >> "$GITHUB_OUTPUT"
+
       - name: Build universal LiteSheet.app
+        env:
+          SIGN_IDENTITY: ${{ steps.cert.outputs.identity }}
         run: ./scripts/bundle-macos.sh --universal
+
+      - name: Notarize
+        if: steps.cert.outputs.identity != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent dist/LiteSheet.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple dist/LiteSheet.app
 
       # A fixed file name keeps releases/latest/download/LiteSheet-macos.zip
       # (used by the website's download button) pointing at the newest build.

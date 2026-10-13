@@ -4,6 +4,14 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Fixed
+
+- Install instructions for macOS 15 and later, where right-click → Open no longer bypasses Gatekeeper
+
+### Changed
+
+- Release builds are signed with a Developer ID and notarized when the Apple signing secrets are configured
+
 ## [0.1.0] - 2026-10-13
 
 First public release.

@@ -322,13 +322,14 @@
         <p>Drag <b>LiteSheet.app</b> into your Applications folder.</p>
       </div>
       <div class="step">
-        <h3>Open it the first time</h3>
-        <p>Right-click LiteSheet and choose <b>Open</b>, then <b>Open</b> again. You only need to do this once.</p>
+        <h3>Allow it once</h3>
+        <p>Open LiteSheet. When macOS says it can't verify the app, click <b>Done</b>, then go to <b>System Settings → Privacy &amp; Security</b> and click <b>Open Anyway</b>. You only do this once.</p>
       </div>
     </div>
     <div class="note">
-      <b>Why the extra step?</b> LiteSheet is free and not yet notarized by Apple, so macOS asks you to confirm the first launch. If macOS says the app "is damaged", run this once in Terminal:
+      <b>Why the extra step?</b> LiteSheet is free and not yet notarized by Apple, so macOS asks you to approve it the first time. Instead of using System Settings, you can also run this once in Terminal:
       <pre>xattr -dr com.apple.quarantine /Applications/LiteSheet.app</pre>
+      On macOS 14 and earlier, right-clicking the app and choosing <b>Open</b> also works.
       Prefer to build it yourself? Clone the repo and run <code>cargo run --release</code>. See the <a href="https://github.com/TheAbhishekIN/litesheet#build-from-source">README</a>.
     </div>
     <div class="cta" style="margin-top:36px">
