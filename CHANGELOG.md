@@ -4,6 +4,12 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-13
+
+### Changed
+
+- The Mac app is signed with a Developer ID and notarized by Apple, so it opens without the "Apple could not verify" warning. The install instructions in the README and on the website are simpler to match
+
 ## [0.2.0] - 2026-10-13
 
 The whole roadmap from 0.1.0: styling, structure and charts, with much better Excel fidelity.
@@ -51,6 +57,7 @@ First public release.
 - BYOK AI: generate formulas, explain selections, filter in plain English and summarize sheets, with any OpenAI-compatible provider; the API key is stored in the macOS Keychain
 - macOS `.app` bundle script with an optional universal (Apple Silicon + Intel) build
 
-[Unreleased]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/TheAbhishekIN/litesheet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/TheAbhishekIN/litesheet/releases/tag/v0.1.0
