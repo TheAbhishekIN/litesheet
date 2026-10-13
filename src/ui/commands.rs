@@ -5,6 +5,7 @@ use egui::Context;
 
 use super::app::{App, ClipData};
 use super::selection::Selection;
+use crate::model::refs::{Axis, Structural};
 use crate::model::{self, Cell, Pos, Value, interpret_input, refs};
 
 impl App {
@@ -294,5 +295,92 @@ impl App {
             .collect();
         self.book.apply("Format", edits);
         self.data_changed();
+    }
+
+    /// (first, count) of the rows the selection covers.
+    pub(crate) fn selected_rows(&self) -> (u32, u32) {
+        let ((r0, _), (r1, _)) = self.sel.range();
+        (r0, r1 - r0 + 1)
+    }
+
+    /// (first, count) of the columns the selection covers.
+    pub(crate) fn selected_cols(&self) -> (u32, u32) {
+        let ((_, c0), (_, c1)) = self.sel.range();
+        (c0, c1 - c0 + 1)
+    }
+
+    pub(crate) fn insert_rows(&mut self, below: bool) {
+        let (r, n) = self.selected_rows();
+        self.structural(Axis::Rows, if below { r + n } else { r }, n as i64);
+    }
+
+    pub(crate) fn delete_rows(&mut self) {
+        let (r, n) = self.selected_rows();
+        self.structural(Axis::Rows, r, -(n as i64));
+    }
+
+    pub(crate) fn insert_cols(&mut self, right: bool) {
+        let (c, n) = self.selected_cols();
+        self.structural(Axis::Cols, if right { c + n } else { c }, n as i64);
+    }
+
+    pub(crate) fn delete_cols(&mut self) {
+        let (c, n) = self.selected_cols();
+        self.structural(Axis::Cols, c, -(n as i64));
+    }
+
+    /// Insert or delete rows/columns on the active sheet, then keep filters
+    /// and the selection pointing at the same data.
+    fn structural(&mut self, axis: Axis, at: u32, count: i64) {
+        self.commit_edit((0, 0));
+        let (sheet, n) = (self.active, count.unsigned_abs() as u32);
+        let result = match (axis, count > 0) {
+            (Axis::Rows, true) => self.book.insert_rows(sheet, at, n),
+            (Axis::Rows, false) => self.book.delete_rows(sheet, at, n),
+            (Axis::Cols, true) => self.book.insert_cols(sheet, at, n),
+            (Axis::Cols, false) => self.book.delete_cols(sheet, at, n),
+        };
+        if let Err(e) = result {
+            self.error(e);
+            return;
+        }
+        let name = self.book.sheets[sheet].name.clone();
+        let change = Structural {
+            sheet: &name,
+            axis,
+            at,
+            count,
+        };
+        if axis == Axis::Cols {
+            let filters = std::mem::take(&mut self.views[sheet].filters);
+            self.views[sheet].filters = filters
+                .into_iter()
+                .filter_map(|(c, f)| change.map_index(c).map(|nc| (nc, f)))
+                .collect();
+        }
+        self.clip = None;
+        // Select what was inserted, or the row/column that moved into the gap.
+        let ((r0, c0), (r1, c1)) = self.sel.range();
+        let last = n.saturating_sub(1);
+        self.sel = match (axis, count > 0) {
+            (Axis::Rows, true) => Selection {
+                anchor: (at, c0),
+                cursor: (at + last, c1),
+            },
+            (Axis::Cols, true) => Selection {
+                anchor: (r0, at),
+                cursor: (r1, at + last),
+            },
+            (Axis::Rows, false) => Selection {
+                anchor: (at, c0),
+                cursor: (at, c1),
+            },
+            (Axis::Cols, false) => Selection {
+                anchor: (r0, at),
+                cursor: (r1, at),
+            },
+        };
+        self.data_changed();
+        self.scroll_to_cursor = true;
     }
 }

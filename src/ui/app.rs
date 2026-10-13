@@ -18,9 +18,7 @@ use crate::model::{self, Book, Cell, Pos};
 pub const CELL_EDITOR_ID: &str = "cell_editor";
 pub const BAR_EDITOR_ID: &str = "formula_bar_editor";
 pub const SEARCH_ID: &str = "search_box";
-/// Excel's limits.
-pub const MAX_ROWS: u32 = 1_048_576;
-pub const MAX_COLS: u32 = 16_384;
+pub use crate::model::{MAX_COLS, MAX_ROWS};
 
 pub struct EditState {
     pub pos: Pos,

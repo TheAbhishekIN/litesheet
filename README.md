@@ -57,6 +57,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Resize columns by dragging; double-click a column border to autofit
 - Cut, copy and paste as tab-separated text, compatible with Excel, Numbers and Google Sheets
 - Fill down (**⌘D**) and fill right (**⌘R**)
+- Insert and delete rows and columns from the Edit menu or by right-clicking a header; formulas, ranges and column widths follow
 - 200-step undo and redo for every change, including paste, fill and sort
 - Live Sum, Average and Count of the selection in the status bar
 - Light and dark themes, and zoom with **⌘+** / **⌘−**
@@ -222,7 +223,7 @@ Measured on Apple Silicon with a release build and a 200,000 × 5 sheet. Reprodu
 
 LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 
-- [ ] Insert and delete rows and columns
+- [x] Insert and delete rows and columns
 - [ ] Cell styling (bold, colours, borders, alignment); styles in imported files are currently dropped on save
 - [x] Rewrite formulas when a sheet is renamed
 - [ ] Open files from Finder (double-click, *Open With*)

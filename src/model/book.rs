@@ -9,6 +9,7 @@ use formualizer::LiteralValue;
 use formualizer::workbook::{Workbook as Engine, WorkbookConfig};
 
 use super::format::date_to_serial;
+use super::refs::{self, Axis, Structural};
 use super::{Cell, Pos, Sheet, Value, interpret_input, parse_literal};
 
 #[derive(Clone, Debug)]
@@ -26,6 +27,11 @@ pub enum MetaChange {
         sheet: usize,
         old: String,
         new: String,
+    },
+    ColWidths {
+        sheet: usize,
+        old: HashMap<u32, f32>,
+        new: HashMap<u32, f32>,
     },
 }
 
@@ -46,6 +52,9 @@ pub struct Book {
 }
 
 const MAX_UNDO: usize = 200;
+/// Excel's sheet size.
+pub const MAX_ROWS: u32 = 1_048_576;
+pub const MAX_COLS: u32 = 16_384;
 
 fn new_engine() -> Engine {
     let mut config = WorkbookConfig::interactive();
@@ -153,7 +162,7 @@ impl Book {
         for (si, sheet) in self.sheets.iter().enumerate() {
             for &pos in &sheet.formulas {
                 let cell = &sheet.cells[&pos];
-                let raw = super::refs::rename_sheet_refs(&cell.raw, &old, new_name);
+                let raw = refs::rename_sheet_refs(&cell.raw, &old, new_name);
                 if raw != cell.raw {
                     edits.push((
                         si,
@@ -167,6 +176,124 @@ impl Book {
             }
         }
         self.commit("Rename sheet", edits, vec![rename]);
+        Ok(())
+    }
+
+    pub fn insert_rows(&mut self, sheet: usize, at: u32, count: u32) -> Result<(), String> {
+        self.structural(sheet, Axis::Rows, at, count as i64)
+    }
+
+    pub fn delete_rows(&mut self, sheet: usize, at: u32, count: u32) -> Result<(), String> {
+        self.structural(sheet, Axis::Rows, at, -(count as i64))
+    }
+
+    pub fn insert_cols(&mut self, sheet: usize, at: u32, count: u32) -> Result<(), String> {
+        self.structural(sheet, Axis::Cols, at, count as i64)
+    }
+
+    pub fn delete_cols(&mut self, sheet: usize, at: u32, count: u32) -> Result<(), String> {
+        self.structural(sheet, Axis::Cols, at, -(count as i64))
+    }
+
+    /// Insert (`count > 0`) or delete (`count < 0`) rows or columns at `at`:
+    /// move the cells after them, adjust references in every sheet's formulas,
+    /// and shift column widths, all as one undoable action.
+    fn structural(&mut self, sheet: usize, axis: Axis, at: u32, count: i64) -> Result<(), String> {
+        if count == 0 {
+            return Ok(());
+        }
+        let limit = match axis {
+            Axis::Rows => MAX_ROWS,
+            Axis::Cols => MAX_COLS,
+        };
+        let index = |p: Pos| match axis {
+            Axis::Rows => p.0,
+            Axis::Cols => p.1,
+        };
+        let with_index = |p: Pos, i: u32| match axis {
+            Axis::Rows => (i, p.1),
+            Axis::Cols => (p.0, i),
+        };
+        let name = self.sheets[sheet].name.clone();
+        let change = Structural {
+            sheet: &name,
+            axis,
+            at,
+            count,
+        };
+        let target = &self.sheets[sheet];
+        if count > 0 {
+            let last = target.cells.keys().map(|&p| index(p)).max().unwrap_or(0);
+            if !target.cells.is_empty() && last as i64 + count >= limit as i64 {
+                return Err(
+                    "There isn't room: cells would be pushed off the end of the sheet".into(),
+                );
+            }
+        }
+
+        // Every edit, keyed by (sheet, position); later inserts win.
+        let mut edits: HashMap<(usize, Pos), Option<Cell>> = HashMap::new();
+        let adjust = |cell: &Cell, own: &str| -> Cell {
+            if cell.is_formula() {
+                Cell {
+                    raw: refs::adjust_for_structure(&cell.raw, own, &change),
+                    ..cell.clone()
+                }
+            } else {
+                cell.clone()
+            }
+        };
+        // Cells on the changed sheet that move or disappear.
+        for (&pos, cell) in &target.cells {
+            let i = index(pos);
+            if i < at {
+                continue;
+            }
+            edits.entry((sheet, pos)).or_insert(None);
+            if let Some(ni) = change.map_index(i) {
+                edits.insert((sheet, with_index(pos, ni)), Some(adjust(cell, &name)));
+            }
+        }
+        // Formulas anywhere whose references change.
+        for (si, s) in self.sheets.iter().enumerate() {
+            for &pos in &s.formulas {
+                if si == sheet && index(pos) >= at {
+                    continue; // already moved above
+                }
+                let cell = &s.cells[&pos];
+                let new = adjust(cell, &s.name);
+                if new.raw != cell.raw {
+                    edits.insert((si, pos), Some(new));
+                }
+            }
+        }
+
+        let mut meta = Vec::new();
+        if axis == Axis::Cols {
+            let old = self.sheets[sheet].col_widths.clone();
+            let new: HashMap<u32, f32> = old
+                .iter()
+                .filter_map(|(&c, &w)| change.map_index(c).map(|nc| (nc, w)))
+                .collect();
+            if new != old {
+                let m = MetaChange::ColWidths { sheet, old, new };
+                self.apply_meta(&m, false)?;
+                meta.push(m);
+            }
+        }
+
+        let what = match axis {
+            Axis::Rows => "row",
+            Axis::Cols => "column",
+        };
+        let n = count.unsigned_abs();
+        let label = format!(
+            "{} {n} {what}{}",
+            if count > 0 { "Insert" } else { "Delete" },
+            if n == 1 { "" } else { "s" }
+        );
+        let edits = edits.into_iter().map(|((s, p), c)| (s, p, c)).collect();
+        self.commit(&label, edits, meta);
         Ok(())
     }
 
@@ -340,6 +467,9 @@ impl Book {
                     .map_err(|e| e.to_string())?;
                 self.sheets[*sheet].name = to.clone();
             }
+            MetaChange::ColWidths { sheet, old, new } => {
+                self.sheets[*sheet].col_widths = if backwards { old } else { new }.clone();
+            }
         }
         self.dirty = true;
         Ok(())
@@ -432,7 +562,7 @@ impl MetaChange {
     /// The sheet this change belongs to.
     pub fn sheet(&self) -> usize {
         match self {
-            MetaChange::RenameSheet { sheet, .. } => *sheet,
+            MetaChange::RenameSheet { sheet, .. } | MetaChange::ColWidths { sheet, .. } => *sheet,
         }
     }
 }

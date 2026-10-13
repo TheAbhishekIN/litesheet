@@ -117,6 +117,31 @@ impl App {
                     self.fill(false);
                 }
                 ui.separator();
+                let (_, nr) = self.selected_rows();
+                let (_, nc) = self.selected_cols();
+                let rows = if nr == 1 {
+                    "Row".to_string()
+                } else {
+                    format!("{nr} Rows")
+                };
+                let cols = if nc == 1 {
+                    "Column".to_string()
+                } else {
+                    format!("{nc} Columns")
+                };
+                if ui.button(format!("Insert {rows} Above")).clicked() {
+                    self.insert_rows(false);
+                }
+                if ui.button(format!("Insert {cols} Left")).clicked() {
+                    self.insert_cols(false);
+                }
+                if ui.button(format!("Delete {rows}")).clicked() {
+                    self.delete_rows();
+                }
+                if ui.button(format!("Delete {cols}")).clicked() {
+                    self.delete_cols();
+                }
+                ui.separator();
                 if ui
                     .add(egui::Button::new("Find…").shortcut_text(sc_text(&ctx, Key::F, false)))
                     .clicked()
