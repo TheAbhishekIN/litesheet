@@ -6,6 +6,7 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ### Added
 
+- Merged cells: Merge & Center (toolbar), Merge Cells and Unmerge (Format menu). A merged range selects, navigates and edits as one cell, follows inserted and deleted rows and columns, and is kept when opening and saving `.xlsx`
 - Cell styles: bold, italic, underline, strikethrough, text and fill colours, alignment and borders, from a new formatting toolbar and ⌘B/⌘I/⌘U. Styles survive typing, copy/paste, fill and sort; Edit → Clear Formats and Clear All remove them
 - Opening an `.xlsx` file now keeps its fonts, colours (including theme colours and tints), fills, borders, alignment, number formats and column widths, and saving writes them back
 - Number formats: Number with thousands separators, Currency ($, €, £, ¥, ₹), Percent and Scientific with a chosen number of decimals, Time and Text, plus Increase/Decrease Decimal. Currency, times and grouped numbers are recognized as you type, formats stay on empty cells, and all formats are saved to `.xlsx` as Excel format codes

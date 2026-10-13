@@ -12,7 +12,13 @@ impl App {
         let ctx = ui.ctx().clone();
         ui.horizontal(|ui| {
             // Name box: shows the selection, accepts a cell to jump to.
-            let mut name = self.name_box.clone().unwrap_or_else(|| self.sel.name());
+            // A selected merged cell is named by its top-left cell, like Excel.
+            let shown = if self.sel_is_single_cell() {
+                refs::cell_name(self.sel.cursor.0, self.sel.cursor.1)
+            } else {
+                self.sel.name()
+            };
+            let mut name = self.name_box.clone().unwrap_or(shown);
             let r = ui.add(
                 egui::TextEdit::singleline(&mut name)
                     .desired_width(90.0)

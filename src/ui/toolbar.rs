@@ -155,6 +155,13 @@ impl App {
             });
             separator(ui);
 
+            // Merge & Center.
+            let merged = self.selection_has_merge();
+            if icon_button(ui, "Merge & Center", merged, paint_merge_icon).clicked() {
+                self.toggle_merge_center();
+            }
+            separator(ui);
+
             // Number format.
             egui::ComboBox::from_id_salt("toolbar_number_format")
                 .selected_text(format_name(fmt))
@@ -344,4 +351,18 @@ fn paint_borders_icon(p: &egui::Painter, r: Rect, color: Color32, b: Borders, in
     let inner_stroke = if inner { strong } else { faint };
     line(pos2(c.x, r.top()), pos2(c.x, r.bottom()), inner_stroke);
     line(pos2(r.left(), c.y), pos2(r.right(), c.y), inner_stroke);
+}
+
+fn paint_merge_icon(p: &egui::Painter, r: Rect, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    p.rect_stroke(r, 1.0, stroke, egui::StrokeKind::Inside);
+    // Two arrows pointing at each other across the middle.
+    let y = r.center().y;
+    let (l, rr, c) = (r.left() + 2.0, r.right() - 2.0, r.center().x);
+    p.line_segment([pos2(l, y), pos2(c - 1.5, y)], stroke);
+    p.line_segment([pos2(c + 1.5, y), pos2(rr, y)], stroke);
+    p.line_segment([pos2(c - 4.0, y - 2.5), pos2(c - 1.5, y)], stroke);
+    p.line_segment([pos2(c - 4.0, y + 2.5), pos2(c - 1.5, y)], stroke);
+    p.line_segment([pos2(c + 4.0, y - 2.5), pos2(c + 1.5, y)], stroke);
+    p.line_segment([pos2(c + 4.0, y + 2.5), pos2(c + 1.5, y)], stroke);
 }

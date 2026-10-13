@@ -19,7 +19,7 @@ pub use format::{
     date_to_serial, fmt_number, format_number, format_value, parse_date, parse_time,
     serial_to_datetime,
 };
-pub use sheet::{DEFAULT_COL_WIDTH, Sheet, move_rows_edits};
+pub use sheet::{DEFAULT_COL_WIDTH, Merge, Sheet, merge_contains, merges_overlap, move_rows_edits};
 pub use style::{Borders, HAlign, PALETTE, Rgb, Style};
 pub use value::{Value, compare_values, parse_literal};
 

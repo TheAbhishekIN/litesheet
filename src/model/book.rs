@@ -10,7 +10,8 @@ use formualizer::workbook::{Workbook as Engine, WorkbookConfig};
 
 use super::format::date_to_serial;
 use super::refs::{self, Axis, Structural};
-use super::{Cell, NumFmt, Pos, Sheet, Value, interpret_input, parse_literal};
+use super::sheet::{Merge, merge_contains, merges_overlap};
+use super::{Cell, HAlign, NumFmt, Pos, Sheet, Value, interpret_input, parse_literal};
 
 #[derive(Clone, Debug)]
 pub struct CellChange {
@@ -32,6 +33,11 @@ pub enum MetaChange {
         sheet: usize,
         old: HashMap<u32, f32>,
         new: HashMap<u32, f32>,
+    },
+    Merges {
+        sheet: usize,
+        old: Vec<Merge>,
+        new: Vec<Merge>,
     },
 }
 
@@ -282,6 +288,28 @@ impl Book {
             }
         }
 
+        let old_merges = self.sheets[sheet].merges.clone();
+        let new_merges: Vec<Merge> = old_merges
+            .iter()
+            .filter_map(|&((r0, c0), (r1, c1))| {
+                let ((r0, r1), (c0, c1)) = match axis {
+                    Axis::Rows => (change.map_span(r0, r1)?, (c0, c1)),
+                    Axis::Cols => ((r0, r1), change.map_span(c0, c1)?),
+                };
+                // A merge shrunk to one cell is no merge at all.
+                ((r0, c0) != (r1, c1)).then_some(((r0, c0), (r1, c1)))
+            })
+            .collect();
+        if new_merges != old_merges {
+            let m = MetaChange::Merges {
+                sheet,
+                old: old_merges,
+                new: new_merges,
+            };
+            self.apply_meta(&m, false)?;
+            meta.push(m);
+        }
+
         let what = match axis {
             Axis::Rows => "row",
             Axis::Cols => "column",
@@ -295,6 +323,65 @@ impl Book {
         let edits = edits.into_iter().map(|((s, p), c)| (s, p, c)).collect();
         self.commit(&label, edits, meta);
         Ok(())
+    }
+
+    /// Merge `range` into one cell. Only the top-left value is kept (as in
+    /// Excel); merges overlapping the range are replaced.
+    /// Returns how many values were dropped.
+    pub fn merge(&mut self, sheet: usize, range: Merge, center: bool) -> usize {
+        let ((r0, c0), (r1, c1)) = range;
+        if (r0, c0) == (r1, c1) {
+            return 0;
+        }
+        let old = self.sheets[sheet].merges.clone();
+        let mut new: Vec<Merge> = old
+            .iter()
+            .copied()
+            .filter(|&m| !merges_overlap(m, range))
+            .collect();
+        new.push(range);
+        let meta = MetaChange::Merges { sheet, old, new };
+        let _ = self.apply_meta(&meta, false);
+
+        let s = &self.sheets[sheet];
+        let mut edits: Vec<(usize, Pos, Option<Cell>)> = s
+            .cells
+            .iter()
+            .filter(|(p, c)| merge_contains(range, **p) && **p != (r0, c0) && !c.raw.is_empty())
+            .map(|(p, c)| (sheet, *p, c.formatting_only()))
+            .collect();
+        let dropped = edits.len();
+        if center {
+            let mut tl = s.cells.get(&(r0, c0)).cloned().unwrap_or_default();
+            tl.style.align = HAlign::Center;
+            edits.push((sheet, (r0, c0), Some(tl)));
+        }
+        self.commit(
+            if center {
+                "Merge & center"
+            } else {
+                "Merge cells"
+            },
+            edits,
+            vec![meta],
+        );
+        dropped
+    }
+
+    /// Unmerge every merged range that overlaps `range`.
+    pub fn unmerge(&mut self, sheet: usize, range: Merge) {
+        let old = self.sheets[sheet].merges.clone();
+        let new: Vec<Merge> = old
+            .iter()
+            .copied()
+            .filter(|&m| !merges_overlap(m, range))
+            .collect();
+        if new.len() == old.len() {
+            return;
+        }
+        let meta = MetaChange::Merges { sheet, old, new };
+        let _ = self.apply_meta(&meta, false);
+        self.commit("Unmerge cells", Vec::new(), vec![meta]);
     }
 
     pub fn delete_sheet(&mut self, idx: usize) {
@@ -474,6 +561,9 @@ impl Book {
             MetaChange::ColWidths { sheet, old, new } => {
                 self.sheets[*sheet].col_widths = if backwards { old } else { new }.clone();
             }
+            MetaChange::Merges { sheet, old, new } => {
+                self.sheets[*sheet].merges = if backwards { old } else { new }.clone();
+            }
         }
         self.dirty = true;
         Ok(())
@@ -577,7 +667,9 @@ impl MetaChange {
     /// The sheet this change belongs to.
     pub fn sheet(&self) -> usize {
         match self {
-            MetaChange::RenameSheet { sheet, .. } | MetaChange::ColWidths { sheet, .. } => *sheet,
+            MetaChange::RenameSheet { sheet, .. }
+            | MetaChange::ColWidths { sheet, .. }
+            | MetaChange::Merges { sheet, .. } => *sheet,
         }
     }
 }

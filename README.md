@@ -65,8 +65,9 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 ### Styling
 - Formatting toolbar: **bold**, *italic*, underline and strikethrough (**⌘B**, **⌘I**, **⌘U**), text and fill colours (palette or custom), left/center/right alignment, borders (all, outside, single sides, none), number format and decimals
 - Text on a coloured fill switches between dark and light automatically to stay readable
+- **Merge & Center**, Merge Cells and Unmerge (toolbar or Format menu); a merged range behaves as one cell for selection, arrow keys and editing
 - Styles are kept when you type over a cell, copy, fill or sort; **Delete** keeps them, *Edit → Clear Formats* and *Clear All* remove them
-- Fonts, colours (including Excel theme colours), fills, borders, alignment, number formats and column widths are read from `.xlsx` files and written back on save
+- Fonts, colours (including Excel theme colours), fills, borders, alignment, number formats, merged cells and column widths are read from `.xlsx` files and written back on save
 
 ### Formulas
 - 400+ Excel-compatible functions, powered by [formualizer](https://crates.io/crates/formualizer): `SUM`, `SUMIFS`, `VLOOKUP`, `INDEX`/`MATCH`, `IF`, `TEXT`, `ROUND` and many more
@@ -236,7 +237,7 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 - [x] Rewrite formulas when a sheet is renamed
 - [ ] Open files from Finder (double-click, *Open With*)
 - [x] More number formats (number, currency, scientific, time, text)
-- [ ] Merged cells
+- [x] Merged cells
 - [ ] Freeze panes
 - [ ] Charts
 - [ ] Tested Linux and Windows builds

@@ -223,7 +223,12 @@ impl App {
 
     /// Move the cursor by (rows, cols) in view space.
     pub(crate) fn move_cursor(&mut self, dr: i64, dc: i64, extend: bool) {
-        let (r, c) = self.sel.cursor;
+        // Step off a merged cell from its far edge, so arrows skip over it.
+        let (mut r, mut c) = self.sel.cursor;
+        if let Some(((r0, c0), (r1, c1))) = self.sheet().merge_at((r, c)) {
+            r = if dr > 0 { r1 } else { r0 };
+            c = if dc > 0 { c1 } else { c0 };
+        }
         let vi = self.view_index(r).unwrap_or(0) as i64;
         let max_vi = self.view_rows().saturating_sub(1) as i64
             + if self.view().is_filtered() { 0 } else { 1000 };
@@ -239,7 +244,50 @@ impl App {
         } else {
             self.sel = Selection::single(pos);
         }
+        self.snap_to_merges();
         self.scroll_to_cursor = true;
+    }
+
+    /// Grow the selection over any merged range it partly covers, and keep
+    /// the active cell on a merge's top-left cell (where its value lives).
+    pub(crate) fn snap_to_merges(&mut self) {
+        let merges = &self.book.sheets[self.active].merges;
+        if merges.is_empty() {
+            return;
+        }
+        let (mut a, mut b) = self.sel.range();
+        loop {
+            let mut grew = false;
+            for &m in merges {
+                if model::merges_overlap(m, (a, b)) {
+                    let (na, nb) = (
+                        (a.0.min(m.0.0), a.1.min(m.0.1)),
+                        (b.0.max(m.1.0), b.1.max(m.1.1)),
+                    );
+                    grew |= (na, nb) != (a, b);
+                    (a, b) = (na, nb);
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        let mut cursor = self.sel.cursor;
+        if let Some(m) = merges.iter().find(|&&m| model::merge_contains(m, cursor)) {
+            cursor = m.0;
+        }
+        // The cursor must sit on an edge of the range for (anchor, cursor) to describe it.
+        if cursor.0 != a.0 && cursor.0 != b.0 {
+            cursor.0 = a.0;
+        }
+        if cursor.1 != a.1 && cursor.1 != b.1 {
+            cursor.1 = a.1;
+        }
+        let anchor = (
+            if cursor.0 == a.0 { b.0 } else { a.0 },
+            if cursor.1 == a.1 { b.1 } else { a.1 },
+        );
+        self.sel = Selection { anchor, cursor };
     }
 
     pub(crate) fn update_title(&mut self, ctx: &Context) {

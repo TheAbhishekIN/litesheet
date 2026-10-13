@@ -235,6 +235,13 @@ impl App {
         if s.n_rows == 0 || last <= first {
             return;
         }
+        if s.merges
+            .iter()
+            .any(|&((r0, _), (r1, _))| r1 >= first && r0 <= last)
+        {
+            self.error("Can't sort rows that contain merged cells. Unmerge them first.");
+            return;
+        }
         let rows: Vec<u32> = (first..=last).collect();
         let mut order = rows.clone();
         order.sort_by(|&a, &b| {
@@ -533,6 +540,46 @@ impl App {
                 BorderKind::Right => b.right |= c == c1,
             }
         });
+    }
+
+    /// Whether the selection touches a merged range.
+    pub(crate) fn selection_has_merge(&self) -> bool {
+        let range = self.sel.range();
+        self.sheet()
+            .merges
+            .iter()
+            .any(|&m| model::merges_overlap(m, range))
+    }
+
+    pub(crate) fn merge_selection(&mut self, center: bool) {
+        self.commit_edit((0, 0));
+        let range = self.sel.range();
+        if range.0 == range.1 {
+            return;
+        }
+        let dropped = self.book.merge(self.active, range, center);
+        self.sel = Selection {
+            anchor: range.1,
+            cursor: range.0,
+        };
+        self.data_changed();
+        if dropped > 0 {
+            self.notify("Merged: only the upper-left value was kept (⌘Z to undo)");
+        }
+    }
+
+    pub(crate) fn unmerge_selection(&mut self) {
+        self.book.unmerge(self.active, self.sel.range());
+        self.data_changed();
+    }
+
+    /// The toolbar's Merge & Center: merge, or unmerge if already merged.
+    pub(crate) fn toggle_merge_center(&mut self) {
+        if self.selection_has_merge() {
+            self.unmerge_selection();
+        } else {
+            self.merge_selection(true);
+        }
     }
 }
 
