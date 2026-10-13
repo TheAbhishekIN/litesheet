@@ -26,4 +26,10 @@ mod util;
 mod tests;
 
 pub use app::App;
+
+/// Where the "Buy me a coffee" buttons lead.
+pub const SUPPORT_URL: &str = "https://buymeacoffee.com/mrabhishek";
+pub const WEBSITE_URL: &str = "https://theabhishekin.github.io/litesheet/";
+pub const REPO_URL: &str = "https://github.com/TheAbhishekIN/litesheet";
+pub const ISSUES_URL: &str = "https://github.com/TheAbhishekIN/litesheet/issues";
 pub use selection::Selection;
