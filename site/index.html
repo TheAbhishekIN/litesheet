@@ -141,6 +141,37 @@
     footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
     footer nav { position: static; background: none; border: 0; backdrop-filter: none; display: flex; gap: 20px; }
 
+    /* Small screens */
+    .brand, .nav-links a, .nav-coffee, footer nav a { white-space: nowrap; }
+    .nav-coffee .label { margin-left: 6px; }
+    .shot-link { display: block; }
+    .shot-link:hover { text-decoration: none; }
+    section[id] { scroll-margin-top: 72px; }
+    pre { white-space: pre-wrap; word-break: break-all; }
+    footer nav { flex-wrap: wrap; row-gap: 10px; }
+    @media (max-width: 600px) {
+      nav .wrap { height: 56px; }
+      .brand { font-size: 17px; gap: 8px; }
+      .brand img { width: 26px; height: 26px; }
+      .nav-links { gap: 14px; }
+      .nav-coffee { padding: 6px 10px; }
+      .nav-coffee .label { display: none; }
+      .hero { padding: 40px 0 28px; }
+      .hero .icon { width: 84px; height: 84px; margin-bottom: 16px; }
+      .hero h1 { font-size: 34px; }
+      .hero h1 br { display: none; }
+      .hero p.lead { font-size: 17px; }
+      .cta { flex-direction: column; align-items: stretch; max-width: 340px; margin: 0 auto; }
+      .cta .btn { justify-content: center; }
+      .shot { margin-top: 32px; border-radius: 10px; }
+      .row { margin-bottom: 48px; }
+      .row h3 { font-size: 23px; }
+      .stat b { font-size: 26px; }
+      .step::before { left: 18px; }
+      footer .wrap { flex-direction: column; }
+      footer nav { gap: 10px 18px; }
+    }
+
     @media (max-width: 900px) {
       .grid, .steps { grid-template-columns: 1fr 1fr; }
       .stats { grid-template-columns: 1fr 1fr; }
@@ -166,7 +197,7 @@
       <a class="hide-sm" href="#ai">AI</a>
       <a class="hide-sm" href="#download">Download</a>
       <a href="https://github.com/TheAbhishekIN/litesheet">GitHub</a>
-      <a class="nav-coffee" href="https://buymeacoffee.com/mrabhishek" target="_blank" rel="noopener">☕ <span class="hide-sm">Buy me a coffee</span></a>
+      <a class="nav-coffee" href="https://buymeacoffee.com/mrabhishek" target="_blank" rel="noopener" aria-label="Buy me a coffee">☕<span class="label">Buy me a coffee</span></a>
     </div>
   </div>
 </nav>
@@ -174,7 +205,7 @@
 <header class="hero">
   <div class="wrap">
     <img class="icon" src="icon.png" alt="LiteSheet app icon">
-    <h1>The spreadsheet that's<br><span>fast, light and private.</span></h1>
+    <h1>The spreadsheet that's <br><span>fast, light and private.</span></h1>
     <p class="lead">LiteSheet opens your Excel and CSV files instantly, handles hundreds of thousands of rows without breaking a sweat, and brings AI help that runs on <em>your</em> API key. Free and open source.</p>
     <div class="cta">
       <a class="btn btn-primary" href="https://github.com/TheAbhishekIN/litesheet/releases/latest/download/LiteSheet-macos.zip">
@@ -187,10 +218,12 @@
       </a>
     </div>
     <p class="meta">macOS 11 or later · Apple Silicon and Intel · ~25 MB · MIT / Apache-2.0</p>
+    <a class="shot-link" href="screenshots/overview-light.png" target="_blank" rel="noopener">
     <picture class="shot" style="display:block">
       <source srcset="screenshots/overview-dark.png" media="(prefers-color-scheme: dark)">
       <img src="screenshots/overview-light.png" alt="LiteSheet showing an orders sheet with a selected column summed in the status bar" width="2160" height="1215">
     </picture>
+    </a>
   </div>
 </header>
 
@@ -249,7 +282,7 @@
           <li>Familiar errors: <code>#DIV/0!</code>, <code>#N/A</code>, <code>#REF!</code></li>
         </ul>
       </div>
-      <img class="shot" src="screenshots/formula-editing.png" alt="Editing a SUMIF formula while pointing at a highlighted range" width="2160" height="1215" loading="lazy">
+      <a class="shot-link" href="screenshots/formula-editing.png" target="_blank" rel="noopener"><img class="shot" src="screenshots/formula-editing.png" alt="Editing a SUMIF formula while pointing at a highlighted range" width="2160" height="1215" loading="lazy"></a>
     </div>
     <div class="row flip">
       <div class="text">
@@ -262,7 +295,7 @@
           <li>Arrow keys skip hidden rows</li>
         </ul>
       </div>
-      <img class="shot" src="screenshots/filtering.png" alt="The filter window for the Region column" width="2160" height="1215" loading="lazy">
+      <a class="shot-link" href="screenshots/filtering.png" target="_blank" rel="noopener"><img class="shot" src="screenshots/filtering.png" alt="The filter window for the Region column" width="2160" height="1215" loading="lazy"></a>
     </div>
     <div class="row">
       <div class="text">
@@ -274,7 +307,7 @@
           <li>Link sheets with formulas like <code>=SUMIF(Orders!C2:C49, A2, Orders!H2:H49)</code></li>
         </ul>
       </div>
-      <img class="shot" src="screenshots/charts.png" alt="A column chart of revenue by region next to a summary table" width="2160" height="1215" loading="lazy">
+      <a class="shot-link" href="screenshots/charts.png" target="_blank" rel="noopener"><img class="shot" src="screenshots/charts.png" alt="A column chart of revenue by region next to a summary table" width="2160" height="1215" loading="lazy"></a>
     </div>
   </div>
 </section>
@@ -297,7 +330,7 @@
           <li><b>Summarize:</b> get the key figures of a whole sheet</li>
         </ul>
       </div>
-      <img class="shot" src="screenshots/ai-formula.png" alt="The AI panel generating a SUMIFS formula" width="2160" height="1215" loading="lazy">
+      <a class="shot-link" href="screenshots/ai-formula.png" target="_blank" rel="noopener"><img class="shot" src="screenshots/ai-formula.png" alt="The AI panel generating a SUMIFS formula" width="2160" height="1215" loading="lazy"></a>
     </div>
   </div>
 </section>
