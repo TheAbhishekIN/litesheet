@@ -21,6 +21,8 @@ pub struct SheetFormatting {
     pub col_widths: Vec<(u32, f64)>,
     /// Merged ranges.
     pub merges: Vec<(Pos, Pos)>,
+    /// Frozen (rows, columns), if the sheet has frozen panes.
+    pub freeze: Option<(u32, u32)>,
 }
 
 /// Formatting for every sheet, keyed by sheet name.
@@ -517,6 +519,16 @@ fn parse_worksheet(xml: &str, styles: &Styles) -> SheetFormatting {
                 for c in min..=max.min(min + 1024) {
                     out.col_widths.push((c - 1, w));
                 }
+            }
+        }
+        "pane" => {
+            if matches!(attr(e, "state").as_deref(), Some("frozen" | "frozenSplit")) {
+                let split = |a| {
+                    attr(e, a)
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .unwrap_or(0.0) as u32
+                };
+                out.freeze = Some((split("ySplit"), split("xSplit")));
             }
         }
         "mergeCell" => {

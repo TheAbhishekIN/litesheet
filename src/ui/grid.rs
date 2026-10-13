@@ -33,6 +33,9 @@ struct Layout {
     /// xs[c] = left edge of column c (content coords, excluding the row header).
     xs: Vec<f32>,
     n_view_rows: u32,
+    /// Frozen view rows and columns, pinned to the top/left while scrolling.
+    frozen_rows: u32,
+    frozen_cols: u32,
 }
 
 impl Layout {
@@ -44,12 +47,39 @@ impl Layout {
         .min(self.xs.len().saturating_sub(2) as u32)
     }
 
+    fn frozen_w(&self) -> f32 {
+        self.xs[(self.frozen_cols as usize).min(self.xs.len() - 1)]
+    }
+
+    fn frozen_h(&self) -> f32 {
+        self.frozen_rows as f32 * ROW_H
+    }
+
+    /// Frozen columns ignore horizontal scrolling, frozen rows vertical.
+    fn x_origin(&self, c: u32) -> f32 {
+        if c < self.frozen_cols {
+            self.left()
+        } else {
+            self.origin.x
+        }
+    }
+
+    fn y_origin(&self, vi: u32) -> f32 {
+        if vi < self.frozen_rows {
+            self.top()
+        } else {
+            self.origin.y
+        }
+    }
+
     /// Screen rect of a cell in view row `vi`, column `c`.
     fn cell_rect(&self, vi: u32, c: u32) -> Rect {
-        let x0 = self.origin.x + self.row_header_w + self.xs[c as usize];
-        let x1 = self.origin.x + self.row_header_w + self.xs[c as usize + 1];
-        let y0 = self.origin.y + HEADER_H + vi as f32 * ROW_H;
-        Rect::from_min_max(pos2(x0, y0), pos2(x1, y0 + ROW_H))
+        let x = self.x_origin(c) + self.row_header_w;
+        let y0 = self.y_origin(vi) + HEADER_H + vi as f32 * ROW_H;
+        Rect::from_min_max(
+            pos2(x + self.xs[c as usize], y0),
+            pos2(x + self.xs[c as usize + 1], y0 + ROW_H),
+        )
     }
 
     fn top(&self) -> f32 {
@@ -58,6 +88,51 @@ impl Layout {
 
     fn left(&self) -> f32 {
         self.origin.x + self.viewport.min.x
+    }
+
+    /// Where the scrolling part of the grid starts on screen.
+    fn scroll_left(&self) -> f32 {
+        self.left() + self.row_header_w + self.frozen_w()
+    }
+
+    fn scroll_top(&self) -> f32 {
+        self.top() + HEADER_H + self.frozen_h()
+    }
+
+    /// The screen area of a region: frozen or scrolling rows × columns.
+    fn region_clip(&self, visible: Rect, frozen_row: bool, frozen_col: bool) -> Rect {
+        let (x0, x1) = if frozen_col {
+            (self.left() + self.row_header_w, self.scroll_left())
+        } else {
+            (self.scroll_left(), visible.max.x)
+        };
+        let (y0, y1) = if frozen_row {
+            (self.top() + HEADER_H, self.scroll_top())
+        } else {
+            (self.scroll_top(), visible.max.y)
+        };
+        Rect::from_min_max(pos2(x0, y0), pos2(x1, y1)).intersect(visible)
+    }
+
+    /// The view row under screen `y` (inside the cell area).
+    fn row_at_y(&self, y: f32) -> u32 {
+        let base = if y < self.scroll_top() {
+            self.top()
+        } else {
+            self.origin.y
+        };
+        (((y - base - HEADER_H) / ROW_H).floor().max(0.0) as u32)
+            .min(self.n_view_rows.saturating_sub(1))
+    }
+
+    /// The column under screen `x` (right of the row header).
+    fn col_at_x(&self, x: f32) -> u32 {
+        let base = if x < self.scroll_left() {
+            self.left()
+        } else {
+            self.origin.x
+        };
+        self.col_at(x - base - self.row_header_w)
     }
 }
 
@@ -97,36 +172,40 @@ impl App {
         }
         scroll.show_viewport(ui, |ui, viewport| {
             ui.set_min_size(content);
+            let freeze = self.sheet().freeze;
+            // Frozen sheet rows → view rows (filters can hide some of them).
+            let frozen_rows = match &self.view().rows {
+                Some(rows) => rows.partition_point(|&r| r < freeze.rows) as u32,
+                None => freeze.rows,
+            };
+            let frozen_cols = freeze.cols.min(xs.len() as u32 - 1);
             let layout = Layout {
                 origin: ui.max_rect().min,
                 viewport,
                 row_header_w,
                 xs,
                 n_view_rows,
+                frozen_rows,
+                frozen_cols,
             };
             self.grid_contents(ui, &layout);
         });
     }
 
     fn hit_test(&self, l: &Layout, p: Pos2) -> Hit {
-        let local = p - l.origin;
-        let in_header = local.y - l.viewport.min.y < HEADER_H;
-        let in_rowhdr = local.x - l.viewport.min.x < l.row_header_w;
-        let col = l.col_at(local.x - l.row_header_w);
-        let vi = ((local.y - HEADER_H) / ROW_H).floor().max(0.0) as u32;
-        let vi = vi.min(l.n_view_rows.saturating_sub(1));
-        let row = self.row_at(vi).unwrap_or(0);
+        let in_header = p.y < l.top() + HEADER_H;
+        let in_rowhdr = p.x < l.left() + l.row_header_w;
+        let col = l.col_at_x(p.x);
+        let row = self.row_at(l.row_at_y(p.y)).unwrap_or(0);
         match (in_header, in_rowhdr) {
             (true, true) => Hit::Corner,
             (true, false) => {
-                let cx = local.x - l.row_header_w;
-                let right = l.xs[col as usize + 1];
-                let left = l.xs[col as usize];
-                if (cx - right).abs() <= RESIZE_GRAB {
+                let rect = l.cell_rect(0, col);
+                if (p.x - rect.right()).abs() <= RESIZE_GRAB {
                     Hit::ColResize(col)
-                } else if col > 0 && (cx - left).abs() <= RESIZE_GRAB {
+                } else if col > 0 && (p.x - rect.left()).abs() <= RESIZE_GRAB {
                     Hit::ColResize(col - 1)
-                } else if self.filter_buttons && right - cx < 18.0 {
+                } else if self.filter_buttons && rect.right() - p.x < 18.0 {
                     Hit::FilterButton(col)
                 } else {
                     Hit::ColHeader(col)
@@ -231,8 +310,10 @@ impl App {
                 self.book.dirty = true;
             } else {
                 // Auto-scroll when dragging past the edge.
-                let inner = Rect::from_min_max(
-                    pos2(visible.min.x + l.row_header_w, visible.min.y + HEADER_H),
+                // (The frozen bands never scroll, so only the scrolling area counts.)
+                let inner = Rect::from_min_max(pos2(l.scroll_left(), l.scroll_top()), visible.max);
+                let cells = Rect::from_min_max(
+                    pos2(l.left() + l.row_header_w, l.top() + HEADER_H),
                     visible.max,
                 );
                 let mut delta = Vec2::ZERO;
@@ -250,7 +331,7 @@ impl App {
                     ui.scroll_with_delta(delta);
                     ctx.request_repaint();
                 }
-                let clamped = p.clamp(inner.min, inner.max - vec2(1.0, 1.0));
+                let clamped = p.clamp(cells.min, cells.max - vec2(1.0, 1.0));
                 match self.hit_test(l, clamped) {
                     Hit::Cell(r, c) => {
                         if self.edit.as_ref().is_some_and(|e| e.pointing.is_some()) {
@@ -339,10 +420,20 @@ impl App {
                 && (c as usize) + 1 < l.xs.len()
                 && vi < l.n_view_rows
             {
+                // Leave room for the headers and frozen bands; a frozen row or
+                // column needs no scrolling in that direction.
                 let rect = l.cell_rect(vi, c);
-                let padded =
-                    Rect::from_min_max(rect.min - vec2(l.row_header_w, HEADER_H), rect.max);
-                ui.scroll_to_rect(padded, None);
+                let x = if c < l.frozen_cols {
+                    visible.x_range()
+                } else {
+                    (rect.min.x - l.row_header_w - l.frozen_w()..=rect.max.x).into()
+                };
+                let y = if vi < l.frozen_rows {
+                    visible.y_range()
+                } else {
+                    (rect.min.y - HEADER_H - l.frozen_h()..=rect.max.y).into()
+                };
+                ui.scroll_to_rect(Rect::from_x_y_ranges(x, y), None);
             }
         }
 
@@ -400,23 +491,27 @@ impl App {
         let has_search = !view.matches.is_empty();
         let editing = self.edit.as_ref().map(|e| e.pos);
 
-        // Grid lines.
-        let stroke = Stroke::new(1.0, grid);
-        let x_end = (l.origin.x + l.row_header_w + l.xs[last_c as usize]).min(visible.max.x);
-        let y_end = (l.origin.y + HEADER_H + last_vi as f32 * ROW_H).min(visible.max.y);
-        for vi in first_vi..=last_vi {
-            let y = l.origin.y + HEADER_H + vi as f32 * ROW_H;
-            painter.hline(visible.min.x..=x_end, y - 0.5, stroke);
-        }
-        for c in first_c..=last_c {
-            let x = l.origin.x + l.row_header_w + l.xs[c as usize];
-            painter.vline(x - 0.5, visible.min.y..=y_end, stroke);
-        }
+        let fr = l.frozen_rows.min(l.n_view_rows);
+        let fc = l.frozen_cols;
+        // (view rows, columns, frozen row?, frozen column?) for each region,
+        // scrolling first so the pinned bands paint over it.
+        let scroll_rows = first_vi.max(fr)..last_vi;
+        let scroll_cols = first_c.max(fc)..last_c;
+        let regions = [
+            (scroll_rows.clone(), scroll_cols.clone(), false, false),
+            (0..fr, scroll_cols, true, false),
+            (scroll_rows, 0..fc, false, true),
+            (0..fr, 0..fc, true, true),
+        ];
 
+        let stroke = Stroke::new(1.0, grid);
         let border_stroke = Stroke::new(1.0, v.strong_text_color());
         // Paint one cell, or a merged range as one cell (`merged` covers the
         // inner grid lines and highlights the whole range).
-        let paint_cell = |rect: Rect, pos: (u32, u32), merged: Option<crate::model::Merge>| {
+        let paint_cell = |painter: &egui::Painter,
+                          rect: Rect,
+                          pos: (u32, u32),
+                          merged: Option<crate::model::Merge>| {
             let cell = sheet.cells.get(&pos);
             let style = cell.map(|c| c.style).unwrap_or_default();
             if merged.is_some() {
@@ -438,7 +533,7 @@ impl App {
                 painter.rect_filled(rect, 0.0, match_fill);
             }
             if style.borders.any() {
-                paint_borders(&painter, rect, style.borders, border_stroke);
+                paint_borders(painter, rect, style.borders, border_stroke);
             }
             let value = sheet.value(pos);
             if editing == Some(pos) || matches!(value, Value::Empty) {
@@ -473,7 +568,8 @@ impl App {
                 Align::Max => rect.right() - 4.0 - g.size().x,
             };
             let at = pos2(x, rect.center().y - g.size().y / 2.0);
-            let clipped = painter.with_clip_rect(rect.shrink2(vec2(1.0, 0.0)).intersect(visible));
+            let clipped =
+                painter.with_clip_rect(rect.shrink2(vec2(1.0, 0.0)).intersect(painter.clip_rect()));
             clipped.galley(at, g.clone(), color);
             if style.bold {
                 // The bundled font has no bold weight: strike twice, slightly offset.
@@ -481,83 +577,142 @@ impl App {
             }
         };
 
-        let merges = self.visible_merges(l, first_vi, last_vi, first_c, last_c);
-        for vi in first_vi..last_vi {
-            let Some(r) = self.row_at(vi) else { continue };
-            for c in first_c..last_c {
-                if merges
-                    .iter()
-                    .any(|(m, _)| crate::model::merge_contains(*m, (r, c)))
-                {
-                    continue;
+        let all_merges = self.visible_merges(l, first_vi, last_vi, first_c, last_c);
+        for (rows, cols, frozen_row, frozen_col) in regions.iter().cloned() {
+            if rows.is_empty() || cols.is_empty() {
+                continue;
+            }
+            let clip = l.region_clip(visible, frozen_row, frozen_col);
+            let painter = ui.painter().with_clip_rect(clip);
+            // Grid lines.
+            for vi in rows.start..=rows.end {
+                let y = l
+                    .cell_rect(vi.min(l.n_view_rows.saturating_sub(1)), cols.start)
+                    .top()
+                    + if vi >= l.n_view_rows { ROW_H } else { 0.0 };
+                painter.hline(clip.x_range(), y - 0.5, stroke);
+            }
+            for c in cols.start..=cols.end {
+                let x = l.cell_rect(rows.start, c.min(l.xs.len() as u32 - 2)).left()
+                    + if c as usize >= l.xs.len() - 1 {
+                        l.cell_rect(rows.start, c - 1).width()
+                    } else {
+                        0.0
+                    };
+                painter.vline(x - 0.5, clip.y_range(), stroke);
+            }
+            for vi in rows.clone() {
+                let Some(r) = self.row_at(vi) else { continue };
+                for c in cols.clone() {
+                    if all_merges
+                        .iter()
+                        .any(|(m, _)| crate::model::merge_contains(*m, (r, c)))
+                    {
+                        continue;
+                    }
+                    paint_cell(&painter, l.cell_rect(vi, c), (r, c), None);
                 }
-                paint_cell(l.cell_rect(vi, c), (r, c), None);
             }
-        }
-        for &(m, rect) in &merges {
-            paint_cell(rect, m.0, Some(m));
-        }
-
-        // Selection outline and cursor.
-        let ((r0, c0), (r1, c1)) = self.sel.range();
-        if let (Some(v0), Some(v1)) = (
-            self.first_visible_at_or_after(r0),
-            self.last_visible_at_or_before(r1),
-        ) && v0 <= v1
-            && (c1 as usize) + 1 < l.xs.len()
-        {
-            let outline = l.cell_rect(v0, c0).union(l.cell_rect(v1, c1));
-            painter.rect_stroke(
-                outline,
-                0.0,
-                Stroke::new(2.0, accent),
-                egui::StrokeKind::Inside,
-            );
-        }
-        let cursor_rect = match self.sheet().merge_at(self.sel.cursor) {
-            Some(m) => self.merge_rect(l, m),
-            None => self
-                .view_index(self.sel.cursor.0)
-                .filter(|_| (self.sel.cursor.1 as usize) + 1 < l.xs.len())
-                .map(|vi| l.cell_rect(vi, self.sel.cursor.1)),
-        };
-        if let Some(rect) = cursor_rect {
-            painter.rect_stroke(
-                rect,
-                0.0,
-                Stroke::new(2.0, accent),
-                egui::StrokeKind::Inside,
-            );
-        }
-
-        // Formula reference being pointed at.
-        if let Some((anchor, _)) = self.edit.as_ref().and_then(|e| e.pointing)
-            && let Some(cursor) = self.pointing_cursor()
-        {
-            let s = Selection { anchor, cursor };
-            let ((r0, c0), (r1, c1)) = s.range();
-            if let (Some(v0), Some(v1)) = (self.view_index(r0), self.view_index(r1)) {
-                let rect = l.cell_rect(v0, c0).union(l.cell_rect(v1, c1));
-                let blue = Color32::from_rgb(40, 120, 240);
-                painter.rect_filled(rect, 0.0, blue.gamma_multiply(0.12));
-                painter.rect_stroke(rect, 0.0, Stroke::new(1.5, blue), egui::StrokeKind::Inside);
+            // A merge is drawn by the region holding its top-left cell.
+            for &(m, rect) in &all_merges {
+                let in_region = self.view_index(m.0.0).is_some_and(|vi| rows.contains(&vi))
+                    && cols.contains(&m.0.1);
+                if in_region {
+                    paint_cell(&painter, rect, m.0, Some(m));
+                }
             }
         }
 
-        // Marching outline around copied/cut range.
-        if let Some(sel) = self.clip_outline() {
-            let ((r0, c0), (r1, c1)) = sel.range();
-            if let (Some(v0), Some(v1)) = (self.view_index(r0), self.view_index(r1))
+        let paint_overlays = |painter: &egui::Painter| {
+            // Selection outline and cursor.
+            let ((r0, c0), (r1, c1)) = self.sel.range();
+            if let (Some(v0), Some(v1)) = (
+                self.first_visible_at_or_after(r0),
+                self.last_visible_at_or_before(r1),
+            ) && v0 <= v1
                 && (c1 as usize) + 1 < l.xs.len()
             {
-                let rect = l.cell_rect(v0, c0).union(l.cell_rect(v1, c1));
+                let outline = l.cell_rect(v0, c0).union(l.cell_rect(v1, c1));
                 painter.rect_stroke(
-                    rect.shrink(1.0),
+                    outline,
                     0.0,
-                    Stroke::new(1.0, accent),
+                    Stroke::new(2.0, accent),
                     egui::StrokeKind::Inside,
                 );
             }
+            let cursor_rect = match self.sheet().merge_at(self.sel.cursor) {
+                Some(m) => self.merge_rect(l, m),
+                None => self
+                    .view_index(self.sel.cursor.0)
+                    .filter(|_| (self.sel.cursor.1 as usize) + 1 < l.xs.len())
+                    .map(|vi| l.cell_rect(vi, self.sel.cursor.1)),
+            };
+            if let Some(rect) = cursor_rect {
+                painter.rect_stroke(
+                    rect,
+                    0.0,
+                    Stroke::new(2.0, accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
+
+            // Formula reference being pointed at.
+            if let Some((anchor, _)) = self.edit.as_ref().and_then(|e| e.pointing)
+                && let Some(cursor) = self.pointing_cursor()
+            {
+                let s = Selection { anchor, cursor };
+                let ((r0, c0), (r1, c1)) = s.range();
+                if let (Some(v0), Some(v1)) = (self.view_index(r0), self.view_index(r1)) {
+                    let rect = l.cell_rect(v0, c0).union(l.cell_rect(v1, c1));
+                    let blue = Color32::from_rgb(40, 120, 240);
+                    painter.rect_filled(rect, 0.0, blue.gamma_multiply(0.12));
+                    painter.rect_stroke(
+                        rect,
+                        0.0,
+                        Stroke::new(1.5, blue),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+
+            // Marching outline around copied/cut range.
+            if let Some(sel) = self.clip_outline() {
+                let ((r0, c0), (r1, c1)) = sel.range();
+                if let (Some(v0), Some(v1)) = (self.view_index(r0), self.view_index(r1))
+                    && (c1 as usize) + 1 < l.xs.len()
+                {
+                    let rect = l.cell_rect(v0, c0).union(l.cell_rect(v1, c1));
+                    painter.rect_stroke(
+                        rect.shrink(1.0),
+                        0.0,
+                        Stroke::new(1.0, accent),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+        };
+        for (_, _, frozen_row, frozen_col) in regions.iter().cloned() {
+            paint_overlays(
+                &ui.painter()
+                    .with_clip_rect(l.region_clip(visible, frozen_row, frozen_col)),
+            );
+        }
+
+        // Freeze lines.
+        let divider = Stroke::new(1.5, v.strong_text_color().gamma_multiply(0.6));
+        if fc > 0 {
+            painter.vline(
+                l.scroll_left() - 0.5,
+                (l.top() + HEADER_H)..=visible.max.y,
+                divider,
+            );
+        }
+        if fr > 0 {
+            painter.hline(
+                (l.left() + l.row_header_w)..=visible.max.x,
+                l.scroll_top() - 0.5,
+                divider,
+            );
         }
     }
 
@@ -653,39 +808,55 @@ impl App {
         let ((sr0, sc0), (sr1, sc1)) = self.sel.range();
         let view = self.view();
 
-        // Column header strip.
+        // Column header strip (frozen columns pinned).
         let top = l.top();
+        let left_edge = l.left() + l.row_header_w;
         let strip = Rect::from_min_size(pos2(visible.min.x, top), vec2(visible.width(), HEADER_H));
         painter.rect_filled(strip, 0.0, hdr_bg);
-        for c in first_c..last_c {
-            let x0 = l.origin.x + l.row_header_w + l.xs[c as usize];
-            let x1 = l.origin.x + l.row_header_w + l.xs[c as usize + 1];
-            let rect = Rect::from_min_max(pos2(x0, top), pos2(x1, top + HEADER_H));
-            let selected = (sc0..=sc1).contains(&c);
-            if selected {
-                painter.rect_filled(rect, 0.0, hdr_sel);
-            }
-            painter.vline(x1 - 0.5, rect.y_range(), Stroke::new(1.0, line));
-            let filtered = view.filters.get(&c).is_some_and(|f| f.is_active());
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                refs::col_name(c),
-                font.clone(),
-                if selected { strong } else { text },
-            );
-            if self.filter_buttons || filtered {
-                let btn = Rect::from_min_max(
-                    pos2(x1 - 16.0, top + 3.0),
-                    pos2(x1 - 3.0, top + HEADER_H - 3.0),
-                );
-                let col = if filtered { accent } else { text };
-                if filtered {
-                    painter.rect_filled(btn, 2.0, accent.gamma_multiply(0.2));
+        let fc = l.frozen_cols;
+        let hdr_clip = |x0: f32, x1: f32| {
+            Rect::from_x_y_ranges(x0..=x1, top..=top + HEADER_H).intersect(visible)
+        };
+        let col_parts = [
+            (
+                first_c.max(fc)..last_c,
+                hdr_clip(l.scroll_left(), visible.max.x),
+            ),
+            (0..fc, hdr_clip(left_edge, l.scroll_left())),
+        ];
+        for (cols, clip) in col_parts {
+            let painter = painter.with_clip_rect(clip);
+            for c in cols {
+                let x = l.cell_rect(0, c).x_range();
+                let (x0, x1) = (x.min, x.max);
+                let rect = Rect::from_min_max(pos2(x0, top), pos2(x1, top + HEADER_H));
+                let selected = (sc0..=sc1).contains(&c);
+                if selected {
+                    painter.rect_filled(rect, 0.0, hdr_sel);
                 }
-                painter.text(btn.center(), Align2::CENTER_CENTER, "⏷", font.clone(), col);
+                painter.vline(x1 - 0.5, rect.y_range(), Stroke::new(1.0, line));
+                let filtered = view.filters.get(&c).is_some_and(|f| f.is_active());
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    refs::col_name(c),
+                    font.clone(),
+                    if selected { strong } else { text },
+                );
+                if self.filter_buttons || filtered {
+                    let btn = Rect::from_min_max(
+                        pos2(x1 - 16.0, top + 3.0),
+                        pos2(x1 - 3.0, top + HEADER_H - 3.0),
+                    );
+                    let col = if filtered { accent } else { text };
+                    if filtered {
+                        painter.rect_filled(btn, 2.0, accent.gamma_multiply(0.2));
+                    }
+                    painter.text(btn.center(), Align2::CENTER_CENTER, "⏷", font.clone(), col);
+                }
             }
         }
+
         painter.hline(
             visible.x_range(),
             top + HEADER_H - 0.5,
@@ -699,34 +870,47 @@ impl App {
             vec2(l.row_header_w, visible.height()),
         );
         painter.rect_filled(strip, 0.0, hdr_bg);
-        for vi in first_vi..last_vi {
-            let Some(r) = self.row_at(vi) else { continue };
-            let y0 = l.origin.y + HEADER_H + vi as f32 * ROW_H;
-            let rect = Rect::from_min_max(pos2(left, y0), pos2(left + l.row_header_w, y0 + ROW_H));
-            if rect.max.y < top + HEADER_H {
-                continue;
+        let fr = l.frozen_rows.min(l.n_view_rows);
+        let row_clip = |y0: f32, y1: f32| {
+            Rect::from_x_y_ranges(left..=left + l.row_header_w, y0..=y1).intersect(visible)
+        };
+        let row_parts = [
+            (
+                first_vi.max(fr)..last_vi,
+                row_clip(l.scroll_top(), visible.max.y),
+            ),
+            (0..fr, row_clip(top + HEADER_H, l.scroll_top())),
+        ];
+        for (rows, clip) in row_parts {
+            let painter = painter.with_clip_rect(clip);
+            for vi in rows {
+                let Some(r) = self.row_at(vi) else { continue };
+                let y0 = l.cell_rect(vi, 0).top();
+                let rect =
+                    Rect::from_min_max(pos2(left, y0), pos2(left + l.row_header_w, y0 + ROW_H));
+                let selected = (sr0..=sr1).contains(&r);
+                if selected {
+                    painter.rect_filled(rect, 0.0, hdr_sel);
+                }
+                painter.hline(rect.x_range(), rect.max.y - 0.5, Stroke::new(1.0, line));
+                // Rows whose numbers skip (filtered) are shown in the accent colour, like Excel.
+                let color = if view.is_filtered() {
+                    accent
+                } else if selected {
+                    strong
+                } else {
+                    text
+                };
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    (r + 1).to_string(),
+                    font.clone(),
+                    color,
+                );
             }
-            let selected = (sr0..=sr1).contains(&r);
-            if selected {
-                painter.rect_filled(rect, 0.0, hdr_sel);
-            }
-            painter.hline(rect.x_range(), rect.max.y - 0.5, Stroke::new(1.0, line));
-            // Rows whose numbers skip (filtered) are shown in the accent colour, like Excel.
-            let color = if view.is_filtered() {
-                accent
-            } else if selected {
-                strong
-            } else {
-                text
-            };
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                (r + 1).to_string(),
-                font.clone(),
-                color,
-            );
         }
+
         painter.vline(
             left + l.row_header_w - 0.5,
             visible.y_range(),

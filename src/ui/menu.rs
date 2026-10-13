@@ -5,8 +5,8 @@ use egui::{Key, KeyboardShortcut, Modifiers, RichText};
 use super::app::{App, Pending};
 use super::util::sc_text;
 use crate::ai;
-use crate::model;
 use crate::model::filter::column_label;
+use crate::model::{self, refs};
 
 impl App {
     pub(crate) fn menu_bar(&mut self, ui: &mut egui::Ui) {
@@ -220,6 +220,24 @@ impl App {
                 }
             });
             ui.menu_button("View", |ui| {
+                let frozen = self.sheet().freeze;
+                let cell = refs::cell_name(self.sel.cursor.0, self.sel.cursor.1);
+                if ui.button(format!("Freeze Panes at {cell}")).clicked() {
+                    self.freeze_at_cursor();
+                }
+                if ui.button("Freeze Top Row").clicked() {
+                    self.set_freeze(model::Freeze { rows: 1, cols: 0 });
+                }
+                if ui.button("Freeze First Column").clicked() {
+                    self.set_freeze(model::Freeze { rows: 0, cols: 1 });
+                }
+                if ui
+                    .add_enabled(frozen.is_active(), egui::Button::new("Unfreeze Panes"))
+                    .clicked()
+                {
+                    self.set_freeze(model::Freeze::default());
+                }
+                ui.separator();
                 let mut dark = ui.visuals().dark_mode;
                 if ui.checkbox(&mut dark, "Dark mode").changed() {
                     ctx.set_theme(if dark {

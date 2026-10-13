@@ -137,6 +137,7 @@ mod tests {
         b.merge(0, ((0, 0), (0, 3)), false);
         b.set_input(0, (7, 0), "=6*7");
         b.merge(0, ((7, 0), (8, 1)), false);
+        b.set_freeze(0, crate::model::Freeze { rows: 1, cols: 2 });
         let path = dir.join("styles.xlsx");
         save(&b, 0, &path).unwrap();
 
@@ -150,6 +151,7 @@ mod tests {
         assert_eq!(s.display((3, 0)), "25.0%");
         assert_eq!(s.display((4, 0)), "12:00:00");
         assert_eq!(s.cells[&(5, 1)].style.fill, Some(Rgb(68, 114, 196)));
+        assert_eq!(s.freeze, crate::model::Freeze { rows: 1, cols: 2 });
         assert_eq!(s.merges.len(), 2);
         assert!(s.merges.contains(&((0, 0), (0, 3))));
         assert_eq!(s.display((0, 0)), "Title");

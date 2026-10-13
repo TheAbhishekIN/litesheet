@@ -581,6 +581,21 @@ impl App {
             self.merge_selection(true);
         }
     }
+
+    /// Freeze the rows above and columns left of the active cell.
+    pub(crate) fn freeze_at_cursor(&mut self) {
+        let (rows, cols) = self.sel.cursor;
+        if rows == 0 && cols == 0 {
+            self.notify("Select the cell below and right of what should stay in view");
+            return;
+        }
+        self.set_freeze(model::Freeze { rows, cols });
+    }
+
+    pub(crate) fn set_freeze(&mut self, freeze: model::Freeze) {
+        self.commit_edit((0, 0));
+        self.book.set_freeze(self.active, freeze);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

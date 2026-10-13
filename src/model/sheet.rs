@@ -4,6 +4,19 @@ use std::collections::{HashMap, HashSet};
 
 use super::{Cell, NumFmt, Pos, Value, format_value, refs};
 
+/// Rows above and columns left of the freeze line stay put while scrolling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Freeze {
+    pub rows: u32,
+    pub cols: u32,
+}
+
+impl Freeze {
+    pub fn is_active(self) -> bool {
+        self.rows > 0 || self.cols > 0
+    }
+}
+
 /// A merged range: (top-left, bottom-right), inclusive.
 pub type Merge = (Pos, Pos);
 
@@ -27,6 +40,8 @@ pub struct Sheet {
     pub col_widths: HashMap<u32, f32>,
     /// Merged ranges as (top-left, bottom-right), inclusive. Never overlapping.
     pub merges: Vec<Merge>,
+    /// Frozen panes: how many top rows and left columns stay in view.
+    pub freeze: Freeze,
     /// Used extent: one past the last non-empty row/col.
     pub n_rows: u32,
     pub n_cols: u32,
@@ -41,6 +56,7 @@ impl Sheet {
             formulas: HashSet::new(),
             col_widths: HashMap::new(),
             merges: Vec::new(),
+            freeze: Freeze::default(),
             n_rows: 0,
             n_cols: 0,
         }

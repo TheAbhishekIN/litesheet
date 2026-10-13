@@ -315,3 +315,24 @@ fn merge_unmerge_and_structure() {
     assert!(b.sheets[0].merges.is_empty());
     assert_eq!(b.undo_label(), Some("Unmerge cells"));
 }
+
+#[test]
+fn freeze_panes_follow_structure() {
+    use crate::model::Freeze;
+    let mut b = Book::new_blank();
+    b.set_freeze(0, Freeze { rows: 2, cols: 1 });
+    assert_eq!(b.undo_label(), Some("Freeze panes"));
+    b.insert_rows(0, 0, 3).unwrap();
+    assert_eq!(b.sheets[0].freeze, Freeze { rows: 5, cols: 1 });
+    b.insert_rows(0, 9, 3).unwrap(); // below the line: no change
+    assert_eq!(b.sheets[0].freeze.rows, 5);
+    b.delete_rows(0, 3, 4).unwrap(); // rows 4-7: two of them were frozen
+    assert_eq!(b.sheets[0].freeze.rows, 3);
+    b.delete_cols(0, 0, 1).unwrap();
+    assert_eq!(b.sheets[0].freeze, Freeze { rows: 3, cols: 0 });
+    b.undo();
+    b.undo();
+    assert_eq!(b.sheets[0].freeze, Freeze { rows: 5, cols: 1 });
+    b.set_freeze(0, Freeze::default());
+    assert!(!b.sheets[0].freeze.is_active());
+}
