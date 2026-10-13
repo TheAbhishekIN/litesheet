@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Build a release LiteSheet.app in ./dist. Pass --universal for an
 # Apple Silicon + Intel binary (needs both rustup targets installed).
+#
+# Signing: set SIGN_IDENTITY to a "Developer ID Application: …" identity in
+# your keychain to sign with the hardened runtime (required for Apple
+# notarization). Without it the app is ad-hoc signed, which runs locally but
+# makes Gatekeeper warn on other Macs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -51,6 +56,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-# Ad-hoc sign so Gatekeeper and the Keychain treat it as one app.
-codesign --force --deep --sign - "$APP" >/dev/null
-echo "Built $APP"
+if [[ -n "${SIGN_IDENTITY:-}" ]]; then
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+  echo "Built $APP (signed by $SIGN_IDENTITY)"
+else
+  # Ad-hoc sign so Gatekeeper and the Keychain treat it as one app.
+  codesign --force --deep --sign - "$APP" >/dev/null
+  echo "Built $APP (ad-hoc signed)"
+fi

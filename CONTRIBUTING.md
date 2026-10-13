@@ -106,9 +106,24 @@ Commit the updated files under `docs/screenshots/` with your change.
 
 ## Releasing (maintainers)
 
-1. Update the version in `Cargo.toml` and move `Unreleased` entries in `CHANGELOG.md` under the new version.
-2. Commit, then tag: `git tag v0.2.0 && git push --tags`.
+1. Update the version in `Cargo.toml`, and move the `Unreleased` entries in `CHANGELOG.md` under the new version.
+2. Merge that through a PR, then tag `main`: `git tag -a v0.2.0 -m "LiteSheet 0.2.0" && git push origin v0.2.0`.
 3. The `Release` workflow builds a universal `LiteSheet.app`, zips it as `LiteSheet-macos.zip` and publishes the GitHub release. The website's download button always points at the latest release's zip.
+
+### Signing and notarization
+
+Without signing secrets, the release is ad-hoc signed and macOS asks users to approve it on first launch. With an [Apple Developer Program](https://developer.apple.com/programs/) membership, add these repository secrets (*Settings → Secrets and variables → Actions*) and the workflow signs and notarizes automatically:
+
+| Secret | Value |
+|---|---|
+| `APPLE_CERTIFICATE_P12` | Your *Developer ID Application* certificate and private key, exported from Keychain Access as `.p12`, then base64-encoded (`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERTIFICATE_PASSWORD` | The password you set when exporting the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | The identity name, e.g. `Developer ID Application: Your Name (TEAMID1234)` |
+| `APPLE_ID` | The Apple ID email of the developer account |
+| `APPLE_TEAM_ID` | Your 10-character Team ID |
+| `APPLE_APP_PASSWORD` | An [app-specific password](https://support.apple.com/102654) for that Apple ID |
+
+Locally, `SIGN_IDENTITY="Developer ID Application: …" ./scripts/bundle-macos.sh` signs with the hardened runtime.
 
 ## License
 
