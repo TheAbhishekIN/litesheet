@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LiteSheet — a fast, private spreadsheet for Mac</title>
+  <meta name="description" content="LiteSheet is a free, open-source spreadsheet for macOS with Excel-compatible formulas, smooth handling of huge files, and AI help that runs on your own API key.">
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <meta property="og:title" content="LiteSheet — a fast, private spreadsheet for Mac">
+  <meta property="og:description" content="Excel-compatible formulas, huge files, and Bring-Your-Own-Key AI. Free and open source.">
+  <meta property="og:image" content="https://theabhishekin.github.io/litesheet/screenshots/overview-light.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-soft: #f4f7f5;
+      --text: #14201a;
+      --muted: #56645c;
+      --line: #dfe7e2;
+      --accent: #16a34a;
+      --accent-strong: #15803d;
+      --accent-soft: #dcfce7;
+      --card: #ffffff;
+      --shadow: 0 1px 2px rgba(16, 40, 24, .06), 0 12px 40px rgba(16, 40, 24, .10);
+      --radius: 14px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1412;
+        --bg-soft: #151c18;
+        --text: #e8efea;
+        --muted: #9aa9a0;
+        --line: #26302b;
+        --accent: #22c55e;
+        --accent-strong: #4ade80;
+        --accent-soft: #15301f;
+        --card: #161d19;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 40px rgba(0, 0, 0, .35);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 17px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent-strong); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; height: auto; display: block; }
+    code { font-family: var(--mono); font-size: .88em; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 6px; padding: .1em .4em; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* Navigation */
+    nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: saturate(180%) blur(14px); border-bottom: 1px solid var(--line); }
+    nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); font-size: 18px; }
+    .brand img { width: 30px; height: 30px; }
+    .brand:hover { text-decoration: none; }
+    .nav-links { display: flex; gap: 24px; align-items: center; font-size: 15px; }
+    .nav-links a { color: var(--muted); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 12px; font-weight: 600; font-size: 16px; border: 1px solid transparent; transition: transform .12s ease, background .12s ease; }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 35%, transparent); }
+    .btn-primary:hover { background: var(--accent-strong); color: #fff; }
+    .btn-secondary { background: var(--card); color: var(--text); border-color: var(--line); }
+    .btn svg { width: 20px; height: 20px; flex: none; }
+
+    /* Hero */
+    .hero { padding: 72px 0 40px; text-align: center; }
+    .hero .icon { width: 112px; height: 112px; margin: 0 auto 20px; filter: drop-shadow(0 10px 24px rgba(22, 163, 74, .25)); }
+    .hero h1 { font-size: clamp(38px, 6vw, 64px); line-height: 1.05; letter-spacing: -0.03em; margin: 0 0 18px; }
+    .hero h1 span { color: var(--accent); }
+    .hero p.lead { font-size: clamp(18px, 2.2vw, 21px); color: var(--muted); max-width: 680px; margin: 0 auto 32px; }
+    .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .meta { margin-top: 16px; color: var(--muted); font-size: 14px; }
+    .shot { margin: 48px auto 0; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--card); }
+
+    /* Sections */
+    section { padding: 72px 0; }
+    section.soft { background: var(--bg-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .section-head { text-align: center; max-width: 720px; margin: 0 auto 44px; }
+    .section-head h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 12px; }
+    .section-head p { color: var(--muted); margin: 0; }
+    .eyebrow { display: inline-block; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-strong); margin-bottom: 10px; }
+
+    /* Feature grid */
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+    .card .ico { width: 40px; height: 40px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-strong); display: grid; place-items: center; margin-bottom: 14px; }
+    .card .ico svg { width: 22px; height: 22px; }
+    .card h3 { margin: 0 0 6px; font-size: 18px; }
+    .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+    /* Showcase rows */
+    .row { display: grid; grid-template-columns: 5fr 7fr; gap: 48px; align-items: center; margin-bottom: 72px; }
+    .row:last-child { margin-bottom: 0; }
+    .row.flip { grid-template-columns: 7fr 5fr; }
+    .row.flip .text { order: 2; }
+    .row h3 { font-size: 28px; letter-spacing: -0.01em; margin: 0 0 12px; line-height: 1.2; }
+    .row p { color: var(--muted); margin: 0 0 14px; }
+    .row ul { margin: 0; padding-left: 20px; color: var(--muted); }
+    .row li { margin: 4px 0; }
+    .row .shot { margin: 0; }
+
+    /* Stats */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    .stat { text-align: center; padding: 26px 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+    .stat b { display: block; font-size: 34px; letter-spacing: -0.02em; color: var(--accent-strong); }
+    .stat span { color: var(--muted); font-size: 15px; }
+    .footnote { text-align: center; color: var(--muted); font-size: 14px; margin-top: 18px; }
+
+    /* Install */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: step; }
+    .step { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; position: relative; }
+    .step::before { counter-increment: step; content: counter(step); position: absolute; top: -14px; left: 24px; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; display: grid; place-items: center; }
+    .step h3 { margin: 6px 0 6px; font-size: 18px; }
+    .step p { margin: 0; color: var(--muted); font-size: 15.5px; }
+    pre { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font: 14px/1.5 var(--mono); }
+    .note { max-width: 760px; margin: 28px auto 0; padding: 16px 20px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--muted); font-size: 15px; }
+    .note b { color: var(--text); }
+
+    /* Footer */
+    footer { padding: 40px 0 56px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+    footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    footer nav { position: static; background: none; border: 0; backdrop-filter: none; display: flex; gap: 20px; }
+
+    @media (max-width: 900px) {
+      .grid, .steps { grid-template-columns: 1fr 1fr; }
+      .stats { grid-template-columns: 1fr 1fr; }
+      .row, .row.flip { grid-template-columns: 1fr; gap: 24px; }
+      .row.flip .text { order: 0; }
+    }
+    @media (max-width: 600px) {
+      .wrap { padding: 0 16px; }
+      .grid, .steps { grid-template-columns: 1fr; }
+      .nav-links a.hide-sm { display: none; }
+      .hero { padding-top: 48px; }
+      section { padding: 56px 0; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.png" alt="">LiteSheet</a>
+    <div class="nav-links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#ai">AI</a>
+      <a class="hide-sm" href="#download">Download</a>
+      <a href="https://github.com/TheAbhishekIN/litesheet">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <img class="icon" src="icon.png" alt="LiteSheet app icon">
+    <h1>The spreadsheet that's<br><span>fast, light and private.</span></h1>
+    <p class="lead">LiteSheet opens your Excel and CSV files instantly, handles hundreds of thousands of rows without breaking a sweat, and brings AI help that runs on <em>your</em> API key. Free and open source.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/TheAbhishekIN/litesheet/releases/latest/download/LiteSheet-macos.zip">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.2 1.8-3.26 1.88-3.31-1.02-1.5-2.62-1.7-3.19-1.72-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.11 8.79.73 1.06 1.6 2.25 2.75 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.71.71 2.88.69 1.19-.02 1.94-1.08 2.66-2.14.84-1.23 1.19-2.42 1.21-2.48-.03-.01-2.31-.89-2.32-3.56zM14.19 6.15c.61-.74 1.02-1.76.9-2.78-.88.04-1.94.58-2.57 1.32-.56.65-1.06 1.69-.93 2.69.98.08 1.98-.5 2.6-1.23z"/></svg>
+        Download for Mac
+      </a>
+      <a class="btn btn-secondary" href="https://github.com/TheAbhishekIN/litesheet">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+    <p class="meta">macOS 11 or later · Apple Silicon and Intel · ~25 MB · MIT / Apache-2.0</p>
+    <picture class="shot" style="display:block">
+      <source srcset="screenshots/overview-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="screenshots/overview-light.png" alt="LiteSheet showing an orders sheet with a selected column summed in the status bar" width="2160" height="1215">
+    </picture>
+  </div>
+</header>
+
+<section id="features" class="soft">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Features</div>
+      <h2>Everything you reach for every day</h2>
+      <p>The spreadsheet essentials, done well, in a small native app that opens instantly.</p>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg></div>
+        <h3>Your files, as they are</h3>
+        <p>Open .xlsx, .xls, .ods, .csv and .tsv. Save back to .xlsx with formulas, dates and column widths kept.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></div>
+        <h3>400+ Excel functions</h3>
+        <p>SUMIFS, VLOOKUP, INDEX/MATCH, TEXT and many more, with live recalculation and references across sheets.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg></div>
+        <h3>Built for big files</h3>
+        <p>A virtualized grid draws only what's on screen, so 200,000 rows scroll as smoothly as 20.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54z"/></svg></div>
+        <h3>Filter, sort, find</h3>
+        <p>Column filters with conditions and value checklists, one-click sorting, and search that highlights every match.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg></div>
+        <h3>Edit without fear</h3>
+        <p>200 levels of undo for everything: typing, paste, fill and sort. Copy and paste works with Excel and Numbers.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        <h3>Private by design</h3>
+        <p>No account, telemetry or cloud. LiteSheet only goes online when you ask the AI something.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="row">
+      <div class="text">
+        <div class="eyebrow">Formulas</div>
+        <h3>Build formulas by pointing</h3>
+        <p>Type <code>=</code>, then click or drag over cells to insert references, just like in Excel. The range you're pointing at is highlighted, and missing brackets are closed for you.</p>
+        <ul>
+          <li>Relative references adjust when you copy, fill or sort</li>
+          <li><code>$A$1</code>-style anchors stay put</li>
+          <li>Familiar errors: <code>#DIV/0!</code>, <code>#N/A</code>, <code>#REF!</code></li>
+        </ul>
+      </div>
+      <img class="shot" src="screenshots/formula-editing.png" alt="Editing a SUMIF formula while pointing at a highlighted range" width="2160" height="1215" loading="lazy">
+    </div>
+    <div class="row flip">
+      <div class="text">
+        <div class="eyebrow">Data</div>
+        <h3>Filters that make sense</h3>
+        <p>Combine conditions like "greater than 200" with a checklist of values. Filtered rows are only hidden, never deleted, and the status bar shows how many rows you're looking at.</p>
+        <ul>
+          <li>Equals, contains, starts with, &gt;, ≤, is empty, and more</li>
+          <li>Right-click any cell to filter by its value</li>
+          <li>Arrow keys skip hidden rows</li>
+        </ul>
+      </div>
+      <img class="shot" src="screenshots/filtering.png" alt="The filter window for the Region column" width="2160" height="1215" loading="lazy">
+    </div>
+    <div class="row">
+      <div class="text">
+        <div class="eyebrow">Workbooks</div>
+        <h3>Many sheets, one workbook</h3>
+        <p>Add, rename and switch sheets with tabs, and link them with formulas like <code>=SUMIF(Orders!C2:C49, A2, Orders!H2:H49)</code>. Select any range to see its sum, average and count.</p>
+      </div>
+      <img class="shot" src="screenshots/multiple-sheets.png" alt="A summary sheet built from formulas that reference another sheet" width="2160" height="1215" loading="lazy">
+    </div>
+  </div>
+</section>
+
+<section id="ai" class="soft">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">AI, your way</div>
+      <h2>Ask in plain English. Bring your own key.</h2>
+      <p>Connect any OpenAI-compatible provider (OpenAI, OpenRouter, Groq) or a local model through Ollama or LM Studio. Your key stays in the macOS Keychain, and the panel shows exactly how much data each request sent.</p>
+    </div>
+    <div class="row">
+      <div class="text">
+        <h3>Write formulas for you</h3>
+        <p>Describe what you want, like "total revenue from shipped West region orders", and get a formula written for your columns, ready to insert.</p>
+        <h3 style="margin-top:28px">Filter, explain, summarize</h3>
+        <ul>
+          <li><b>Filter:</b> "West region orders over $300" becomes regular column filters you can inspect and edit</li>
+          <li><b>Explain:</b> select a range and ask what it shows</li>
+          <li><b>Summarize:</b> get the key figures of a whole sheet</li>
+        </ul>
+      </div>
+      <img class="shot" src="screenshots/ai-formula.png" alt="The AI panel generating a SUMIFS formula" width="2160" height="1215" loading="lazy">
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Performance</div>
+      <h2>Fast where it counts</h2>
+      <p>Measured on a 200,000-row sheet on an Apple Silicon Mac.</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>1.5 s</b><span>to open the file</span></div>
+      <div class="stat"><b>&lt; 0.1 ms</b><span>per frame while scrolling</span></div>
+      <div class="stat"><b>4 ms</b><span>to edit and recalculate</span></div>
+      <div class="stat"><b>9 ms</b><span>to search 1M cells</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="download" class="soft">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Get started</div>
+      <h2>Install in a minute</h2>
+      <p>One download for Apple Silicon and Intel Macs running macOS 11 or later.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <h3>Download</h3>
+        <p><a href="https://github.com/TheAbhishekIN/litesheet/releases/latest/download/LiteSheet-macos.zip">LiteSheet-macos.zip</a> from the latest release, and double-click it to unzip.</p>
+      </div>
+      <div class="step">
+        <h3>Move to Applications</h3>
+        <p>Drag <b>LiteSheet.app</b> into your Applications folder.</p>
+      </div>
+      <div class="step">
+        <h3>Open it the first time</h3>
+        <p>Right-click LiteSheet and choose <b>Open</b>, then <b>Open</b> again. You only need to do this once.</p>
+      </div>
+    </div>
+    <div class="note">
+      <b>Why the extra step?</b> LiteSheet is free and not yet notarized by Apple, so macOS asks you to confirm the first launch. If macOS says the app "is damaged", run this once in Terminal:
+      <pre>xattr -dr com.apple.quarantine /Applications/LiteSheet.app</pre>
+      Prefer to build it yourself? Clone the repo and run <code>cargo run --release</code>. See the <a href="https://github.com/TheAbhishekIN/litesheet#build-from-source">README</a>.
+    </div>
+    <div class="cta" style="margin-top:36px">
+      <a class="btn btn-primary" href="https://github.com/TheAbhishekIN/litesheet/releases/latest/download/LiteSheet-macos.zip">Download for Mac</a>
+      <a class="btn btn-secondary" href="https://github.com/TheAbhishekIN/litesheet/releases">All releases</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>LiteSheet is free and open source under the MIT or Apache-2.0 license.</span>
+    <nav>
+      <a href="https://github.com/TheAbhishekIN/litesheet">GitHub</a>
+      <a href="https://github.com/TheAbhishekIN/litesheet/blob/main/CONTRIBUTING.md">Contribute</a>
+      <a href="https://github.com/TheAbhishekIN/litesheet/issues">Report an issue</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

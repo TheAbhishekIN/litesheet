@@ -1,0 +1,352 @@
+//! The workbook: sheets, undo/redo history, and the bridge to the
+//! formualizer calculation engine.
+
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+
+use chrono::Timelike;
+use formualizer::LiteralValue;
+use formualizer::workbook::{Workbook as Engine, WorkbookConfig};
+
+use super::format::date_to_serial;
+use super::{Cell, Pos, Sheet, Value, interpret_input, parse_literal};
+
+#[derive(Clone, Debug)]
+pub struct CellChange {
+    pub sheet: usize,
+    pub pos: Pos,
+    pub old: Option<Cell>,
+    pub new: Option<Cell>,
+}
+
+struct HistoryEntry {
+    label: String,
+    changes: Vec<CellChange>,
+}
+
+pub struct Book {
+    pub sheets: Vec<Sheet>,
+    pub path: Option<PathBuf>,
+    pub dirty: bool,
+    engine: Engine,
+    undo: Vec<HistoryEntry>,
+    redo: Vec<HistoryEntry>,
+}
+
+const MAX_UNDO: usize = 200;
+
+fn new_engine() -> Engine {
+    let mut config = WorkbookConfig::interactive();
+    // We keep our own undo history; the engine's change log would only cost memory.
+    config.enable_changelog = false;
+    Engine::new_with_config(config)
+}
+
+impl Book {
+    pub fn new_blank() -> Self {
+        let mut book = Self::empty();
+        book.add_sheet("Sheet1");
+        book
+    }
+
+    fn empty() -> Self {
+        Self {
+            sheets: Vec::new(),
+            path: None,
+            dirty: false,
+            engine: new_engine(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
+    }
+
+    /// Build a book from loaded sheet data (used by the file readers).
+    pub fn from_sheets(sheets: Vec<(String, Vec<(Pos, Cell)>)>) -> Self {
+        let mut book = Self::empty();
+        for (name, cells) in sheets {
+            let idx = book.add_sheet(&name);
+            if let (Some(r), Some(c)) = (
+                cells.iter().map(|x| x.0.0).max(),
+                cells.iter().map(|x| x.0.1).max(),
+            ) {
+                book.reserve(idx, (r, c));
+            }
+            for (pos, cell) in cells {
+                book.write_cell(idx, pos, Some(cell));
+            }
+            book.sheets[idx].recompute_extent();
+        }
+        if book.sheets.is_empty() {
+            book.add_sheet("Sheet1");
+        }
+        book.recalc();
+        book
+    }
+
+    pub fn add_sheet(&mut self, name: &str) -> usize {
+        let name = self.unique_sheet_name(name);
+        let _ = self.engine.add_sheet(&name);
+        self.sheets.push(Sheet::new(name));
+        self.sheets.len() - 1
+    }
+
+    pub fn unique_sheet_name(&self, base: &str) -> String {
+        let base = if base.trim().is_empty() {
+            "Sheet"
+        } else {
+            base.trim()
+        };
+        if !self
+            .sheets
+            .iter()
+            .any(|s| s.name.eq_ignore_ascii_case(base))
+        {
+            return base.to_string();
+        }
+        (2..)
+            .map(|i| format!("{base} {i}"))
+            .find(|n| !self.sheets.iter().any(|s| s.name.eq_ignore_ascii_case(n)))
+            .unwrap()
+    }
+
+    pub fn rename_sheet(&mut self, idx: usize, new_name: &str) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("Sheet name can't be empty".into());
+        }
+        if new_name.contains(['[', ']', ':', '*', '?', '/', '\\']) || new_name.len() > 31 {
+            return Err("Sheet names can't contain [ ] : * ? / \\ or exceed 31 characters".into());
+        }
+        if self
+            .sheets
+            .iter()
+            .enumerate()
+            .any(|(i, s)| i != idx && s.name.eq_ignore_ascii_case(new_name))
+        {
+            return Err(format!("A sheet named \"{new_name}\" already exists"));
+        }
+        let old = self.sheets[idx].name.clone();
+        self.engine
+            .rename_sheet(&old, new_name)
+            .map_err(|e| e.to_string())?;
+        self.sheets[idx].name = new_name.to_string();
+        self.dirty = true;
+        self.recalc();
+        Ok(())
+    }
+
+    pub fn delete_sheet(&mut self, idx: usize) {
+        if self.sheets.len() <= 1 {
+            return;
+        }
+        let name = self.sheets.remove(idx).name;
+        let _ = self.engine.delete_sheet(&name);
+        // History refers to sheets by index, which just shifted.
+        self.undo.clear();
+        self.redo.clear();
+        self.dirty = true;
+        self.recalc();
+    }
+
+    /// Grow the engine's column storage to cover `max` in one step. Without
+    /// this, writing row by row regrows every column per new row (O(n²)).
+    fn reserve(&mut self, sheet: usize, max: Pos) {
+        let s = &self.sheets[sheet];
+        if max.0 < s.n_rows && max.1 < s.n_cols {
+            return;
+        }
+        let (r, c) = (max.0.max(s.n_rows) + 1, max.1.max(s.n_cols) + 1);
+        if !s.cells.contains_key(&(r - 1, c - 1)) {
+            let name = s.name.clone();
+            let _ = self.engine.set_value(&name, r, c, LiteralValue::Empty);
+        }
+    }
+
+    /// Apply a batch of edits as one undoable action.
+    pub fn apply(&mut self, label: &str, edits: Vec<(usize, Pos, Option<Cell>)>) {
+        let mut extents: HashMap<usize, Pos> = HashMap::new();
+        for (sheet, pos, cell) in &edits {
+            if cell.is_some() {
+                let e = extents.entry(*sheet).or_insert(*pos);
+                *e = (e.0.max(pos.0), e.1.max(pos.1));
+            }
+        }
+        for (sheet, max) in extents {
+            self.reserve(sheet, max);
+        }
+        let mut changes = Vec::with_capacity(edits.len());
+        let mut touched = HashSet::new();
+        for (sheet, pos, new) in edits {
+            let new = new.filter(|c| !c.raw.is_empty());
+            let old = self.sheets[sheet].cells.get(&pos).cloned();
+            if old == new {
+                continue;
+            }
+            self.write_cell(sheet, pos, new.clone());
+            touched.insert(sheet);
+            changes.push(CellChange {
+                sheet,
+                pos,
+                old,
+                new,
+            });
+        }
+        if changes.is_empty() {
+            return;
+        }
+        for s in touched {
+            self.sheets[s].recompute_extent();
+        }
+        self.recalc();
+        self.dirty = true;
+        self.redo.clear();
+        self.undo.push(HistoryEntry {
+            label: label.to_string(),
+            changes,
+        });
+        if self.undo.len() > MAX_UNDO {
+            self.undo.remove(0);
+        }
+    }
+
+    /// Set a cell from user-typed text (interprets dates and percentages).
+    pub fn set_input(&mut self, sheet: usize, pos: Pos, input: &str) {
+        let cell = interpret_input(input, self.sheets[sheet].fmt(pos));
+        self.apply("Edit cell", vec![(sheet, pos, cell)]);
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+    pub fn undo_label(&self) -> Option<&str> {
+        self.undo.last().map(|e| e.label.as_str())
+    }
+    pub fn redo_label(&self) -> Option<&str> {
+        self.redo.last().map(|e| e.label.as_str())
+    }
+
+    /// Returns the cells touched, so the UI can move the selection there.
+    pub fn undo(&mut self) -> Option<(usize, Vec<Pos>)> {
+        let entry = self.undo.pop()?;
+        let r = self.replay(&entry, true);
+        self.redo.push(entry);
+        Some(r)
+    }
+
+    pub fn redo(&mut self) -> Option<(usize, Vec<Pos>)> {
+        let entry = self.redo.pop()?;
+        let r = self.replay(&entry, false);
+        self.undo.push(entry);
+        Some(r)
+    }
+
+    fn replay(&mut self, entry: &HistoryEntry, backwards: bool) -> (usize, Vec<Pos>) {
+        let mut touched = HashSet::new();
+        let iter: Box<dyn Iterator<Item = &CellChange>> = if backwards {
+            Box::new(entry.changes.iter().rev())
+        } else {
+            Box::new(entry.changes.iter())
+        };
+        for ch in iter {
+            let target = if backwards {
+                ch.old.clone()
+            } else {
+                ch.new.clone()
+            };
+            self.write_cell(ch.sheet, ch.pos, target);
+            touched.insert(ch.sheet);
+        }
+        for s in touched {
+            self.sheets[s].recompute_extent();
+        }
+        self.recalc();
+        self.dirty = true;
+        let sheet = entry.changes.first().map(|c| c.sheet).unwrap_or(0);
+        (sheet, entry.changes.iter().map(|c| c.pos).collect())
+    }
+
+    /// Write one cell into both our model and the engine. Does not recalc.
+    fn write_cell(&mut self, sheet: usize, pos: Pos, cell: Option<Cell>) {
+        let (r, c) = (pos.0 + 1, pos.1 + 1);
+        let Self { sheets, engine, .. } = self;
+        let s = &mut sheets[sheet];
+        s.formulas.remove(&pos);
+        match cell {
+            None => {
+                s.cells.remove(&pos);
+                s.values.remove(&pos);
+                let _ = engine.set_value(&s.name, r, c, LiteralValue::Empty);
+            }
+            Some(cell) => {
+                if cell.is_formula() {
+                    s.formulas.insert(pos);
+                    s.values.insert(pos, Value::Empty);
+                    if engine.set_formula(&s.name, r, c, &cell.raw).is_err() {
+                        s.values.insert(pos, Value::Error("#NAME?".into()));
+                    }
+                } else {
+                    let v = parse_literal(&cell.raw);
+                    let _ = engine.set_value(&s.name, r, c, to_literal(&v));
+                    s.values.insert(pos, v);
+                }
+                s.n_rows = s.n_rows.max(pos.0 + 1);
+                s.n_cols = s.n_cols.max(pos.1 + 1);
+                s.cells.insert(pos, cell);
+            }
+        }
+    }
+
+    /// Recalculate and pull formula results back into the model.
+    pub fn recalc(&mut self) {
+        let _ = self.engine.evaluate_all();
+        for s in &mut self.sheets {
+            for &pos in &s.formulas {
+                let v = match self.engine.get_value(&s.name, pos.0 + 1, pos.1 + 1) {
+                    Some(lv) => from_literal(&lv),
+                    None => Value::Empty,
+                };
+                // Keep our parse-error marker if the engine has nothing better.
+                if v == Value::Empty
+                    && matches!(s.values.get(&pos), Some(Value::Error(e)) if e == "#NAME?")
+                {
+                    continue;
+                }
+                s.values.insert(pos, v);
+            }
+        }
+    }
+}
+
+fn to_literal(v: &Value) -> LiteralValue {
+    match v {
+        Value::Empty => LiteralValue::Empty,
+        Value::Number(n) => LiteralValue::Number(*n),
+        Value::Text(s) => LiteralValue::Text(s.clone()),
+        Value::Bool(b) => LiteralValue::Boolean(*b),
+        Value::Error(_) => LiteralValue::Text(String::new()),
+    }
+}
+
+fn from_literal(lv: &LiteralValue) -> Value {
+    match lv {
+        LiteralValue::Int(i) => Value::Number(*i as f64),
+        LiteralValue::Number(n) => Value::Number(*n),
+        LiteralValue::Text(s) => Value::Text(s.clone()),
+        LiteralValue::Boolean(b) => Value::Bool(*b),
+        LiteralValue::Date(d) => Value::Number(date_to_serial(d.and_hms_opt(0, 0, 0).unwrap())),
+        LiteralValue::DateTime(dt) => Value::Number(date_to_serial(*dt)),
+        LiteralValue::Time(t) => Value::Number(t.num_seconds_from_midnight() as f64 / 86400.0),
+        LiteralValue::Duration(d) => Value::Number(d.num_seconds() as f64 / 86400.0),
+        LiteralValue::Array(rows) => rows
+            .first()
+            .and_then(|r| r.first())
+            .map(from_literal)
+            .unwrap_or(Value::Empty),
+        LiteralValue::Empty => Value::Number(0.0),
+        LiteralValue::Pending => Value::Empty,
+        LiteralValue::Error(e) => Value::Error(e.kind.to_string()),
+    }
+}

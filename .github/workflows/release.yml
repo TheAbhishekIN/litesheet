@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: Build macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build universal LiteSheet.app
+        run: ./scripts/bundle-macos.sh --universal
+
+      # A fixed file name keeps releases/latest/download/LiteSheet-macos.zip
+      # (used by the website's download button) pointing at the newest build.
+      - name: Zip
+        run: ditto -c -k --keepParent dist/LiteSheet.app LiteSheet-macos.zip
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: LiteSheet-macos.zip

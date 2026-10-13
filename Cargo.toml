@@ -1,0 +1,50 @@
+[package]
+name = "litesheet"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "A lightweight, fast, privacy-focused spreadsheet with Excel-compatible formulas and Bring-Your-Own-Key AI"
+authors = ["The LiteSheet contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/TheAbhishekIN/litesheet"
+readme = "README.md"
+keywords = ["spreadsheet", "excel", "xlsx", "csv", "egui"]
+categories = ["gui", "science", "visualization"]
+exclude = ["docs/screenshots/*", "dist/*"]
+
+[dependencies]
+# UI
+eframe = "0.36"
+egui = "0.36"
+rfd = "0.17"
+
+# Spreadsheet engine and file formats
+formualizer = "0.11"
+calamine = "0.36"
+rust_xlsxwriter = "0.99"
+csv = "1.4"
+chrono = "0.4"
+
+# AI (Bring Your Own Key)
+reqwest = { version = "0.13", features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+keyring = "4"
+
+# Utilities
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+egui_kittest = { version = "0.36", features = ["eframe", "wgpu", "snapshot"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+# Full debug info for this dependency tree runs to several GB; line tables
+# still give usable backtraces.
+debug = "line-tables-only"
