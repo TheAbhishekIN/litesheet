@@ -475,3 +475,33 @@ fn insert_move_and_delete_a_chart() {
     key(&mut h, Key::Z, Modifiers::COMMAND);
     assert_eq!(h.state().sheet().charts.len(), 1);
 }
+
+#[test]
+fn files_opened_from_finder_respect_unsaved_changes() {
+    let dir = std::env::temp_dir().join(format!("litesheet-finder-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let other = dir.join("budget.csv");
+    std::fs::write(&other, "Item,Cost\nRent,1200\n").unwrap();
+
+    let mut h = harness(SALES_CSV);
+    click(&mut h, cell(1, 1), Modifiers::NONE);
+    type_text(&mut h, "edited");
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert!(h.state().book.dirty);
+
+    // macOS asks us to open another file: unsaved work triggers the prompt.
+    crate::platform::simulate_open([other.clone()]);
+    h.run_steps(3);
+    h.get_by_label_contains("Save changes to"); // panics if the prompt is missing
+    assert_eq!(display(&h, 1, 1), "edited", "nothing replaced yet");
+    h.get_by_label("Don't Save").click();
+    for _ in 0..50 {
+        h.run_steps(2);
+        if h.state().sheet().name == "budget" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(display(&h, 1, 1), "1200");
+    std::fs::remove_dir_all(&dir).ok();
+}

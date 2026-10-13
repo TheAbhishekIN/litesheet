@@ -53,6 +53,43 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Excel Workbook</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>org.openxmlformats.spreadsheetml.sheet</string>
+        <string>com.microsoft.excel.sheet.macroenabled.12</string>
+        <string>com.microsoft.excel.xls</string>
+      </array>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>xlsx</string><string>xlsm</string><string>xls</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>OpenDocument Spreadsheet</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>org.oasis-open.opendocument.spreadsheet</string></array>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>ods</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>CSV Document</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.comma-separated-values-text</string>
+        <string>public.tab-separated-values-text</string>
+      </array>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>csv</string><string>tsv</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

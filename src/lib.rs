@@ -7,10 +7,12 @@
 //! - [`io`]: reading and writing `.xlsx` and `.csv` files.
 //! - [`ai`]: the OpenAI-compatible client, prompts and key storage.
 //! - [`ui`]: the egui application.
+//! - [`platform`]: OS integration (opening files from Finder).
 
 pub mod ai;
 pub mod io;
 pub mod model;
+pub mod platform;
 pub mod ui;
 
 pub use ui::App;

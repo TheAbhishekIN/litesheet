@@ -35,6 +35,7 @@ impl App {
                     self.start_load(path, ctx);
                 }
             }
+            Pending::OpenFile(path) => self.start_load(path, ctx),
             Pending::Close => {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -65,6 +66,9 @@ impl App {
                 self.set_book(book);
                 self.loading = None;
                 self.notify(format!("Opened {name} ({cells} cells)"));
+                if std::env::var_os("LITESHEET_LOG").is_some() {
+                    eprintln!("litesheet: opened {name} ({cells} cells)");
+                }
             }
             Ok(Err(e)) => {
                 self.loading = None;
@@ -134,7 +138,9 @@ impl App {
     }
 
     pub(crate) fn confirm_dialog(&mut self, ctx: &Context) {
-        let Some(pending) = self.pending else { return };
+        let Some(pending) = self.pending.clone() else {
+            return;
+        };
         let name = self
             .book
             .path

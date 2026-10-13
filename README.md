@@ -44,7 +44,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Open `.xlsx`, `.xlsm`, `.xls`, `.ods`, `.csv` and `.tsv` files
 - Save as `.xlsx` (all sheets) or `.csv` (current sheet), and export any sheet as CSV
 - Formulas, dates, percentages and column widths are kept when you save
-- Open files from the File menu, by dragging them onto the window, or from the command line
+- Open files from Finder (double-click, *Open With*, or drop on the Dock icon), the File menu, by dragging onto the window, or from the command line
 - Unsaved-changes prompt when you create, open or quit; a `•` in the title bar marks unsaved changes
 
 ### Grid and editing
@@ -241,7 +241,7 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 - [x] Insert and delete rows and columns
 - [x] Cell styling (bold, colours, borders, alignment), kept when opening and saving `.xlsx`
 - [x] Rewrite formulas when a sheet is renamed
-- [ ] Open files from Finder (double-click, *Open With*)
+- [x] Open files from Finder (double-click, *Open With*, drop on the Dock icon)
 - [x] More number formats (number, currency, scientific, time, text)
 - [x] Merged cells
 - [x] Freeze panes

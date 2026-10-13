@@ -16,6 +16,7 @@ model  ←  io  ←  ai  ←  ui
 | `io` | model, calamine, rust_xlsxwriter, csv | Converting files to and from a `Book` |
 | `ai` | model, reqwest, tokio, keyring | Prompts, the HTTP client, reading replies, key storage |
 | `ui` | everything, egui/eframe | The desktop app |
+| `platform` | objc2 (macOS) | OS integration: files opened from Finder |
 
 Keeping `model` free of UI code means almost all spreadsheet behaviour can be unit-tested quickly, without a window.
 
@@ -106,6 +107,10 @@ ai/
 A request runs on a two-thread tokio runtime owned by `App`. The result comes back through an `mpsc` channel, which `App::poll_ai` reads at the start of each frame, so the UI never waits on the network.
 
 The spreadsheet data sent with each task is built in `ui/ai_panel.rs` (`ai_context`) and capped at 60 KB. The Filter task asks the model for JSON (`{"filters": [...]}`), which `parse_filters` turns into ordinary `ColumnFilter`s. The model never runs anything; it only proposes filters or a formula that the user can see.
+
+## `platform`: opening files from Finder
+
+macOS sends files opened from Finder as an "open documents" Apple Event. winit owns the application delegate (and aborts if it's replaced), so `platform.rs` installs an Apple Event handler instead, in `applicationWillFinishLaunching`, the moment Apple documents for it. That's after AppKit installs its defaults and before it dispatches the document a launch was for. eframe creates the app later, so `platform::install` runs from eframe's `event_loop_builder` hook, before the event loop exists, and listens for the will-finish-launching notification. Opened paths are queued, the UI is woken, and `App` routes them through the same unsaved-changes flow as File → Open. The bundle's `Info.plist` (written by `scripts/bundle-macos.sh`) declares the document types.
 
 ## `ui`: the desktop app
 

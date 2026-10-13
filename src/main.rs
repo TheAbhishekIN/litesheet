@@ -14,6 +14,9 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport,
+        // Runs before the event loop exists: early enough to catch the
+        // document macOS launched us with (double-click in Finder).
+        event_loop_builder: Some(Box::new(|_| litesheet::platform::install())),
         ..Default::default()
     };
     eframe::run_native(
