@@ -18,6 +18,7 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ### Changed
 
+- README screenshots, the website and `samples/sales.xlsx` show the new styling, frozen header and charts
 - Release builds are signed with a Developer ID and notarized when the Apple signing secrets are configured
 
 ### Fixed

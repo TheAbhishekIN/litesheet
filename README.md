@@ -108,6 +108,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 
 | | |
 |---|---|
+| **Charts that update with your data**<br><img src="docs/screenshots/charts.png" alt="A column chart of revenue by region next to a summary table"> | **Formatting toolbar**<br><img src="docs/screenshots/formatting.png" alt="The fill colour palette open over currency-formatted columns in dark mode"> |
 | **Build formulas by pointing at cells**<br><img src="docs/screenshots/formula-editing.png" alt="Editing a SUMIF formula with the referenced range highlighted"> | **Several sheets, linked by formulas**<br><img src="docs/screenshots/multiple-sheets.png" alt="A summary sheet built with SUMIF and COUNTIF"> |
 | **Column filters**<br><img src="docs/screenshots/filtering.png" alt="The filter window for the Region column"> | **Find**<br><img src="docs/screenshots/search.png" alt="Search results highlighted in the grid"> |
 | **AI: generate a formula**<br><img src="docs/screenshots/ai-formula.png" alt="The AI panel generating a SUMIFS formula in dark mode"> | **AI: filter in plain English**<br><img src="docs/screenshots/ai-filter.png" alt="The AI panel turning a request into column filters"> |
@@ -166,7 +167,7 @@ Build a double-clickable `dist/LiteSheet.app` (add `--universal` for Apple Silic
 
 ## Using LiteSheet
 
-Try it on the bundled `samples/sales.xlsx`: an order list plus a summary sheet built with `SUMIF`, `COUNTIF` and `INDEX`/`MATCH`.
+Try it on the bundled `samples/sales.xlsx`: a styled order list with a frozen header row, plus a summary sheet built with `SUMIF`, `COUNTIF` and `INDEX`/`MATCH` and a chart.
 
 ### Keyboard shortcuts
 
