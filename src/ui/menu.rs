@@ -4,6 +4,7 @@ use egui::{Key, KeyboardShortcut, Modifiers, RichText};
 
 use super::app::{App, Pending};
 use super::util::sc_text;
+use super::{ISSUES_URL, REPO_URL, SUPPORT_URL, WEBSITE_URL};
 use crate::ai;
 use crate::model::filter::column_label;
 use crate::model::{self, refs};
@@ -259,6 +260,38 @@ impl App {
                     });
                 }
                 ui.label(RichText::new("Zoom: ⌘+ / ⌘−").weak());
+            });
+            ui.menu_button("Help", |ui| {
+                for (label, url) in [
+                    ("LiteSheet Website", WEBSITE_URL),
+                    ("Source Code on GitHub", REPO_URL),
+                    ("Report an Issue…", ISSUES_URL),
+                ] {
+                    if ui.button(label).clicked() {
+                        ctx.open_url(egui::OpenUrl::new_tab(url));
+                    }
+                }
+                ui.separator();
+                if ui.button("Buy Me a Coffee…").clicked() {
+                    ctx.open_url(egui::OpenUrl::new_tab(SUPPORT_URL));
+                }
+            });
+            // The support button sits at the far right of the menu bar.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let coffee = egui::Button::new(
+                    RichText::new("☕ Buy me a coffee")
+                        .color(egui::Color32::from_rgb(0x1A, 0x1A, 0x1A)),
+                )
+                .fill(egui::Color32::from_rgb(0xFF, 0xDD, 0x00));
+                if ui
+                    .add(coffee)
+                    .on_hover_text(
+                        "LiteSheet is free. If it helps you, you can support its development.",
+                    )
+                    .clicked()
+                {
+                    ctx.open_url(egui::OpenUrl::new_tab(SUPPORT_URL));
+                }
             });
         });
     }

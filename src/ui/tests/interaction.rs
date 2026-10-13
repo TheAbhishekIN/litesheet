@@ -9,6 +9,9 @@ use super::*;
 #[test]
 fn renders_initial() {
     let mut h = harness(SALES_CSV);
+    // The support button and Help menu are in the menu bar.
+    h.get_by_label_contains("Buy me a coffee");
+    h.get_by_label("Help");
     shot(&mut h, "01-initial");
 }
 

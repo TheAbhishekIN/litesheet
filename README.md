@@ -8,12 +8,13 @@
 
 Excel-compatible formulas, filtering and sorting, smooth scrolling through hundreds of thousands of rows, and AI help that runs on *your* API key.
 
-**[Website](https://theabhishekin.github.io/litesheet/)** · **[Download for Mac](https://github.com/TheAbhishekIN/litesheet/releases/latest/download/LiteSheet-macos.zip)** · **[Contributing](CONTRIBUTING.md)**
+**[Website](https://theabhishekin.github.io/litesheet/)** · **[Download for Mac](https://github.com/TheAbhishekIN/litesheet/releases/latest/download/LiteSheet-macos.zip)** · **[Contributing](CONTRIBUTING.md)** · **[☕ Buy me a coffee](https://buymeacoffee.com/mrabhishek)**
 
 [![CI](https://github.com/TheAbhishekIN/litesheet/actions/workflows/ci.yml/badge.svg)](https://github.com/TheAbhishekIN/litesheet/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
 ![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange.svg)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/mrabhishek)
 
 <img src="docs/screenshots/overview-light.png" alt="LiteSheet showing an orders sheet with a selected column and its sum in the status bar" width="900">
 
@@ -35,6 +36,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - [Privacy](#privacy)
 - [Performance](#performance)
 - [Roadmap and limitations](#roadmap-and-limitations)
+- [Support](#support)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -250,6 +252,14 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 - [ ] Tested Linux and Windows builds
 
 Have an idea? [Open a feature request](https://github.com/TheAbhishekIN/litesheet/issues/new/choose).
+
+## Support
+
+LiteSheet is free and open source, built in spare time. If it saves you time or you'd like to see it grow, you can support its development:
+
+<a href="https://buymeacoffee.com/mrabhishek"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="48"></a>
+
+Starring the repo, reporting bugs and sharing LiteSheet help a lot too.
 
 ## Contributing
 
