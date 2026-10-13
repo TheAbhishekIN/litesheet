@@ -76,6 +76,15 @@ impl App {
         if sc(cmd, Key::Z) {
             self.undo();
         }
+        if sc(cmd, Key::B) {
+            self.toggle_bold();
+        }
+        if sc(cmd, Key::I) {
+            self.toggle_italic();
+        }
+        if sc(cmd, Key::U) {
+            self.toggle_underline();
+        }
         if sc(cmd, Key::D) {
             self.fill(true);
         }

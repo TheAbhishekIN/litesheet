@@ -4,6 +4,7 @@
 
 mod csv;
 mod xlsx;
+mod xlsx_styles;
 
 use std::path::Path;
 
@@ -43,6 +44,113 @@ pub fn save(book: &Book, active_sheet: usize, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn styles_formats_and_widths_roundtrip() {
+        use crate::model::{Borders, Cell, Currency, HAlign, NumFmt, Rgb, Style};
+        let dir = std::env::temp_dir().join(format!("litesheet-style-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut b = Book::new_blank();
+        let fancy = Style {
+            bold: true,
+            italic: true,
+            underline: true,
+            strike: true,
+            color: Some(Rgb(192, 0, 0)),
+            fill: Some(Rgb(255, 242, 204)),
+            align: HAlign::Center,
+            borders: Borders {
+                top: true,
+                bottom: true,
+                left: false,
+                right: true,
+            },
+        };
+        let euro = NumFmt::Currency {
+            decimals: 2,
+            symbol: Currency::Euro,
+        };
+        b.apply(
+            "s",
+            vec![
+                (
+                    0,
+                    (0, 0),
+                    Some(Cell {
+                        raw: "Title".into(),
+                        fmt: NumFmt::General,
+                        style: fancy,
+                    }),
+                ),
+                (
+                    0,
+                    (1, 0),
+                    Some(Cell {
+                        raw: "1234.5".into(),
+                        fmt: euro,
+                        style: Style::default(),
+                    }),
+                ),
+                (
+                    0,
+                    (2, 0),
+                    Some(Cell {
+                        raw: "00042".into(),
+                        fmt: NumFmt::Text,
+                        style: Style::default(),
+                    }),
+                ),
+                (
+                    0,
+                    (3, 0),
+                    Some(Cell {
+                        raw: "0.25".into(),
+                        fmt: NumFmt::Percent { decimals: Some(1) },
+                        style: Style::default(),
+                    }),
+                ),
+                (
+                    0,
+                    (4, 0),
+                    Some(Cell {
+                        raw: "0.5".into(),
+                        fmt: NumFmt::Time,
+                        style: Style::default(),
+                    }),
+                ),
+                // Formatting on an empty cell survives too.
+                (
+                    0,
+                    (5, 1),
+                    Some(Cell {
+                        raw: String::new(),
+                        fmt: NumFmt::General,
+                        style: Style {
+                            fill: Some(Rgb(68, 114, 196)),
+                            ..Style::default()
+                        },
+                    }),
+                ),
+            ],
+        );
+        b.sheets[0].col_widths.insert(0, 180.0);
+        let path = dir.join("styles.xlsx");
+        save(&b, 0, &path).unwrap();
+
+        let l = load(&path).unwrap();
+        let s = &l.sheets[0];
+        assert_eq!(s.cells[&(0, 0)].style, fancy);
+        assert_eq!(s.cells[&(1, 0)].fmt, euro);
+        assert_eq!(s.display((1, 0)), "€1,234.50");
+        assert_eq!(s.cells[&(2, 0)].fmt, NumFmt::Text);
+        assert_eq!(s.display((2, 0)), "00042");
+        assert_eq!(s.display((3, 0)), "25.0%");
+        assert_eq!(s.display((4, 0)), "12:00:00");
+        assert_eq!(s.cells[&(5, 1)].style.fill, Some(Rgb(68, 114, 196)));
+        let w = s.col_widths[&0];
+        assert!((w - 180.0).abs() < 8.0, "width {w}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn xlsx_and_csv_roundtrip() {
@@ -87,6 +195,7 @@ mod tests {
                 Some(crate::model::Cell {
                     raw: "12.5".into(),
                     fmt: cur,
+                    ..Default::default()
                 }),
             )],
         );
@@ -99,6 +208,7 @@ mod tests {
                 Some(crate::model::Cell {
                     raw: String::new(),
                     fmt: sci,
+                    ..Default::default()
                 }),
             )],
         );

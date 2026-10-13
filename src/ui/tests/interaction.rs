@@ -110,7 +110,7 @@ fn sort_and_filter() {
     // Filter buttons on, open the Region filter from its header button.
     key(&mut h, Key::L, Modifiers::COMMAND | Modifiers::SHIFT);
     assert!(h.state().filter_buttons);
-    click(&mut h, pos2(50.0 + 300.0 - 9.0, 67.0), Modifiers::NONE);
+    click(&mut h, pos2(50.0 + 300.0 - 9.0, HEADER_Y), Modifiers::NONE);
     assert_eq!(h.state().filter_popup.as_ref().map(|p| p.col), Some(2));
     shot(&mut h, "05-filter-popup");
     {
@@ -197,7 +197,7 @@ fn insert_and_delete_rows_from_context_menu() {
     assert_eq!(h.state().sheet().cells[&(9, 5)].raw, "=SUM(F2:F9)");
 
     // Insert a column left of B from its header; Date moves to C.
-    right_click(&mut h, pos2(200.0, 67.0));
+    right_click(&mut h, pos2(200.0, HEADER_Y));
     assert_eq!(h.state().sel.name(), "B1:B10");
     h.get_by_label("Insert Column Left").click();
     h.run_steps(2);
@@ -239,4 +239,77 @@ fn number_format_menu_and_decimals() {
 
     // Editing a currency cell shows the plain number.
     assert_eq!(h.state().sheet().edit_text((1, 5)), "5");
+}
+
+#[test]
+fn cell_styles_from_toolbar_and_shortcuts() {
+    use crate::model::{Borders, HAlign, Rgb};
+    let mut h = harness(SALES_CSV);
+    let style = |h: &Harness<'_, App>, r, c| {
+        h.state()
+            .sheet()
+            .cells
+            .get(&(r, c))
+            .map(|c| c.style)
+            .unwrap_or_default()
+    };
+
+    // Header row: ⌘B, a fill, centred, with an outline.
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    click(&mut h, cell(0, 6), Modifiers::SHIFT);
+    key(&mut h, Key::B, Modifiers::COMMAND);
+    assert!(style(&h, 0, 3).bold);
+    h.state_mut().set_fill(Some(Rgb(22, 163, 74)));
+    h.get_by_label("Center").click();
+    h.run_steps(2);
+    assert_eq!(style(&h, 0, 6).align, HAlign::Center);
+    h.state_mut()
+        .set_borders(crate::ui::commands::BorderKind::Outline);
+    assert_eq!(
+        style(&h, 0, 0).borders,
+        Borders {
+            top: true,
+            bottom: true,
+            left: true,
+            right: false
+        }
+    );
+    assert_eq!(
+        style(&h, 0, 6).borders,
+        Borders {
+            top: true,
+            bottom: true,
+            left: false,
+            right: true
+        }
+    );
+
+    // Prices in red italic via the toolbar's I button.
+    click(&mut h, cell(1, 5), Modifiers::NONE);
+    click(&mut h, cell(8, 5), Modifiers::SHIFT);
+    h.get_by_label("I").click();
+    h.run_steps(2);
+    h.state_mut().set_text_color(Some(Rgb(192, 0, 0)));
+    assert!(style(&h, 4, 5).italic);
+    assert_eq!(style(&h, 4, 5).color, Some(Rgb(192, 0, 0)));
+    shot(&mut h, "styles");
+
+    // ⌘B again on a bold cell turns bold off for the selection.
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    key(&mut h, Key::B, Modifiers::COMMAND);
+    assert!(!style(&h, 0, 0).bold);
+    key(&mut h, Key::Z, Modifiers::COMMAND);
+    assert!(style(&h, 0, 0).bold);
+
+    // Typing over a styled cell keeps the style; Delete keeps it too.
+    type_text(&mut h, "Order #");
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(display(&h, 0, 0), "Order #");
+    assert!(style(&h, 0, 0).bold);
+    click(&mut h, cell(0, 0), Modifiers::NONE);
+    key(&mut h, Key::Delete, Modifiers::NONE);
+    assert_eq!(display(&h, 0, 0), "");
+    assert_eq!(style(&h, 0, 0).fill, Some(Rgb(22, 163, 74)));
+    h.state_mut().clear_formats();
+    assert!(!h.state().sheet().cells.contains_key(&(0, 0)));
 }

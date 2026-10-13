@@ -24,6 +24,9 @@ calamine = "0.36.1"
 rust_xlsxwriter = "0.99.1"
 csv = "1.4.0"
 chrono = "0.4.45"
+# Reading cell styles from .xlsx (calamine doesn't expose them)
+quick-xml = "0.42.0"
+zip = { version = "9.0.2", default-features = false, features = ["deflate"] }
 
 # AI (Bring Your Own Key)
 reqwest = { version = "0.13.5", features = ["json"] }
@@ -38,7 +41,6 @@ serde_json = "1.0.154"
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.release]
 lto = "thin"

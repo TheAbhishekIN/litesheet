@@ -291,6 +291,11 @@ impl eframe::App for App {
         }
 
         egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui));
+        egui::Panel::top("toolbar").show(ui, |ui| {
+            ui.add_space(3.0);
+            self.toolbar(ui);
+            ui.add_space(3.0);
+        });
         egui::Panel::top("formula_bar").show(ui, |ui| {
             ui.add_space(3.0);
             self.formula_bar(ui);

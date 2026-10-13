@@ -62,6 +62,12 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Live Sum, Average and Count of the selection in the status bar
 - Light and dark themes, and zoom with **⌘+** / **⌘−**
 
+### Styling
+- Formatting toolbar: **bold**, *italic*, underline and strikethrough (**⌘B**, **⌘I**, **⌘U**), text and fill colours (palette or custom), left/center/right alignment, borders (all, outside, single sides, none), number format and decimals
+- Text on a coloured fill switches between dark and light automatically to stay readable
+- Styles are kept when you type over a cell, copy, fill or sort; **Delete** keeps them, *Edit → Clear Formats* and *Clear All* remove them
+- Fonts, colours (including Excel theme colours), fills, borders, alignment, number formats and column widths are read from `.xlsx` files and written back on save
+
 ### Formulas
 - 400+ Excel-compatible functions, powered by [formualizer](https://crates.io/crates/formualizer): `SUM`, `SUMIFS`, `VLOOKUP`, `INDEX`/`MATCH`, `IF`, `TEXT`, `ROUND` and many more
 - Dependent cells recalculate automatically
@@ -166,6 +172,7 @@ Try it on the bundled `samples/sales.xlsx`: an order list plus a summary sheet b
 | Commit and move down / right | Return / Tab (⇧ to reverse) |
 | Cancel edit | Esc |
 | Clear selection | Delete |
+| Bold / Italic / Underline | ⌘B / ⌘I / ⌘U |
 | Fill down / right | ⌘D / ⌘R |
 | Select all | ⌘A |
 | Jump to the edge of the data | ⌘ + arrow (⇧ to extend) |
@@ -225,7 +232,7 @@ Measured on Apple Silicon with a release build and a 200,000 × 5 sheet. Reprodu
 LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 
 - [x] Insert and delete rows and columns
-- [ ] Cell styling (bold, colours, borders, alignment); styles in imported files are currently dropped on save
+- [x] Cell styling (bold, colours, borders, alignment), kept when opening and saving `.xlsx`
 - [x] Rewrite formulas when a sheet is renamed
 - [ ] Open files from Finder (double-click, *Open With*)
 - [x] More number formats (number, currency, scientific, time, text)

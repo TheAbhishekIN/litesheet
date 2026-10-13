@@ -238,6 +238,7 @@ fn text_and_formatted_empty_cells() {
     let text = Cell {
         raw: "00042".into(),
         fmt: NumFmt::Text,
+        ..Default::default()
     };
     b.apply("t", vec![(0, (0, 0), Some(text))]);
     assert_eq!(b.sheets[0].display((0, 0)), "00042");
@@ -245,6 +246,7 @@ fn text_and_formatted_empty_cells() {
     let formula_text = Cell {
         raw: "=1+1".into(),
         fmt: NumFmt::Text,
+        ..Default::default()
     };
     b.apply("t", vec![(0, (1, 0), Some(formula_text))]);
     assert_eq!(b.sheets[0].display((1, 0)), "=1+1");
@@ -262,6 +264,7 @@ fn text_and_formatted_empty_cells() {
             Some(Cell {
                 raw: String::new(),
                 fmt,
+                ..Default::default()
             }),
         )],
     );

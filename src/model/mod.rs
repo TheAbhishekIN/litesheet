@@ -10,6 +10,7 @@ pub mod filter;
 mod format;
 pub mod refs;
 mod sheet;
+mod style;
 mod value;
 
 pub use book::{Book, CellChange, MAX_COLS, MAX_ROWS, MetaChange};
@@ -19,6 +20,7 @@ pub use format::{
     serial_to_datetime,
 };
 pub use sheet::{DEFAULT_COL_WIDTH, Sheet, move_rows_edits};
+pub use style::{Borders, HAlign, PALETTE, Rgb, Style};
 pub use value::{Value, compare_values, parse_literal};
 
 #[cfg(test)]

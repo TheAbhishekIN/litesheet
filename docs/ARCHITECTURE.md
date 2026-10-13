@@ -27,6 +27,7 @@ model/
 ├── cell.rs     Pos, Cell (raw input + NumFmt), interpret_input()
 ├── value.rs    Value (computed result), parse_literal(), compare_values()
 ├── format.rs   number/date/percent display, Excel date serials
+├── style.rs    Style: font emphasis, colours, alignment, borders
 ├── sheet.rs    Sheet: cells, values, column widths, used extent
 ├── book.rs     Book: sheets, undo/redo, formula-engine bridge
 ├── refs.rs     A1 references, shift_formula() for relative references
@@ -36,9 +37,10 @@ model/
 
 ### Cells and values
 
-Each cell stores two things:
+Each cell stores three things:
 
 - **`Cell`**: what the user typed (`raw`, e.g. `=SUM(A1:A3)`, `42`, `'00042`) and a display format (`NumFmt`).
+- **`Style`**: bold/italic/underline/strike, text and fill colours, alignment, borders.
 - **`Value`**: the computed result (`Number`, `Text`, `Bool`, `Error` or `Empty`).
 
 `Sheet` keeps both in `HashMap<Pos, _>`, so empty cells cost nothing. `Pos` is a zero-based `(row, col)`.
@@ -87,6 +89,7 @@ The grid works in view indexes (0..number of visible rows) and converts them to 
 `io::load` and `io::save` choose a format from the file extension:
 
 - `io/csv.rs`: CSV/TSV. Fields go through `interpret_input`, so dates and numbers are recognised. Saving writes the displayed values of the current sheet.
+- `io/xlsx_styles.rs`: calamine doesn't expose formatting, so this reads `styles.xml`, the theme and each worksheet's XML directly (fonts, fills, borders, alignment, number-format codes, theme colours with tints, column widths) and maps Excel number-format codes onto `NumFmt`.
 - `io/xlsx.rs`: reading uses calamine (`.xlsx`, `.xlsm`, `.xls`, `.ods`), taking both cell values and formula text. Writing uses rust_xlsxwriter and stores each formula together with its computed result, so other apps show values without recalculating.
 
 ## `ai`: Bring Your Own Key
@@ -115,6 +118,7 @@ The spreadsheet data sent with each task is built in `ui/ai_panel.rs` (`ai_conte
 | `commands.rs` | Clear, copy/cut/paste, fill, sort, undo/redo, number formats |
 | `keyboard.rs` | Every keyboard shortcut and grid navigation |
 | `menu.rs` | The menu bar |
+| `toolbar.rs` | The formatting toolbar (emphasis, colours, alignment, borders, number format) |
 | `formula_bar.rs` | Name box and formula bar |
 | `search.rs` | The find bar |
 | `filtering.rs` | The filter window and applying filters |
