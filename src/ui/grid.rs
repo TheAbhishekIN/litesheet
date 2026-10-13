@@ -1,12 +1,15 @@
 //! Virtualized grid: only the rows and columns in view are laid out and
 //! painted, so sheets with hundreds of thousands of rows scroll smoothly.
 
-use egui::{Align2, Color32, CursorIcon, FontId, Id, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
+use egui::text::{LayoutJob, TextFormat};
+use egui::{
+    Align, Align2, Color32, CursorIcon, FontId, Id, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2,
+};
 
 use super::app::{App, CELL_EDITOR_ID};
 use super::selection::Selection;
 use super::util::set_cursor_end;
-use crate::model::{DEFAULT_COL_WIDTH, Value, refs};
+use crate::model::{DEFAULT_COL_WIDTH, HAlign, Value, refs};
 
 pub const ROW_H: f32 = 22.0;
 pub const HEADER_H: f32 = 22.0;
@@ -395,58 +398,6 @@ impl App {
         let has_search = !view.matches.is_empty();
         let editing = self.edit.as_ref().map(|e| e.pos);
 
-        for vi in first_vi..last_vi {
-            let Some(r) = self.row_at(vi) else { continue };
-            for c in first_c..last_c {
-                let rect = l.cell_rect(vi, c);
-                let pos = (r, c);
-                if self.sel.contains(pos) && !self.sel.is_single() {
-                    painter.rect_filled(rect, 0.0, sel_fill);
-                }
-                if has_search && Some(pos) == current {
-                    painter.rect_filled(rect, 0.0, current_match_fill);
-                } else if has_search && view.matches.binary_search(&pos).is_ok() {
-                    painter.rect_filled(rect, 0.0, match_fill);
-                }
-                if editing == Some(pos) {
-                    continue;
-                }
-                let value = sheet.value(pos);
-                if matches!(value, Value::Empty) {
-                    continue;
-                }
-                let s = sheet.display(pos);
-                let (align, x, color) = match value {
-                    Value::Number(_) => (Align2::RIGHT_CENTER, rect.right() - 4.0, text),
-                    Value::Bool(_) => (Align2::CENTER_CENTER, rect.center().x, text),
-                    Value::Error(_) => (Align2::CENTER_CENTER, rect.center().x, error),
-                    _ => (Align2::LEFT_CENTER, rect.left() + 4.0, text),
-                };
-                let clip = rect.shrink2(vec2(1.0, 0.0)).intersect(visible);
-                // Numbers that don't fit show as ### like Excel.
-                let shown = if matches!(value, Value::Number(_)) {
-                    let galley_w = painter
-                        .layout_no_wrap(s.clone(), font.clone(), color)
-                        .size()
-                        .x;
-                    if galley_w > rect.width() - 6.0 {
-                        "#".repeat(((rect.width() - 6.0) / 7.0).max(1.0) as usize)
-                    } else {
-                        s
-                    }
-                } else {
-                    s
-                };
-                painter.with_clip_rect(clip).text(
-                    pos2(x, rect.center().y),
-                    align,
-                    shown,
-                    font.clone(),
-                    color,
-                );
-            }
-        }
-
         // Grid lines.
         let stroke = Stroke::new(1.0, grid);
         let x_end = (l.origin.x + l.row_header_w + l.xs[last_c as usize]).min(visible.max.x);
@@ -458,6 +409,72 @@ impl App {
         for c in first_c..=last_c {
             let x = l.origin.x + l.row_header_w + l.xs[c as usize];
             painter.vline(x - 0.5, visible.min.y..=y_end, stroke);
+        }
+
+        let border_stroke = Stroke::new(1.0, v.strong_text_color());
+        for vi in first_vi..last_vi {
+            let Some(r) = self.row_at(vi) else { continue };
+            for c in first_c..last_c {
+                let rect = l.cell_rect(vi, c);
+                let pos = (r, c);
+                let cell = sheet.cells.get(&pos);
+                let style = cell.map(|c| c.style).unwrap_or_default();
+                if let Some(fill) = style.fill {
+                    painter.rect_filled(rect, 0.0, rgb(fill));
+                }
+                if self.sel.contains(pos) && !self.sel.is_single() {
+                    painter.rect_filled(rect, 0.0, sel_fill);
+                }
+                if has_search && Some(pos) == current {
+                    painter.rect_filled(rect, 0.0, current_match_fill);
+                } else if has_search && view.matches.binary_search(&pos).is_ok() {
+                    painter.rect_filled(rect, 0.0, match_fill);
+                }
+                if style.borders.any() {
+                    paint_borders(&painter, rect, style.borders, border_stroke);
+                }
+                let value = sheet.value(pos);
+                if editing == Some(pos) || matches!(value, Value::Empty) {
+                    continue;
+                }
+                // Explicit colour, else readable on the fill, else the theme's.
+                let color = match (style.color, style.fill, value) {
+                    (Some(c), _, _) => rgb(c),
+                    (None, _, Value::Error(_)) => error,
+                    (None, Some(fill), _) if fill.luminance() > 0.4 => Color32::from_gray(20),
+                    (None, Some(_), _) => Color32::from_gray(240),
+                    (None, None, _) => text,
+                };
+                let shown = sheet.display(pos);
+                let galley =
+                    |s: String| ui.fonts_mut(|f| f.layout_job(text_job(s, &font, color, &style)));
+                let mut g = galley(shown);
+                // Numbers that don't fit show as ### like Excel.
+                if matches!(value, Value::Number(_)) && g.size().x > rect.width() - 6.0 {
+                    g = galley("#".repeat(((rect.width() - 6.0) / 7.0).max(1.0) as usize));
+                }
+                let align = match (style.align, value) {
+                    (HAlign::Left, _) => Align::Min,
+                    (HAlign::Center, _) => Align::Center,
+                    (HAlign::Right, _) => Align::Max,
+                    (HAlign::General, Value::Number(_)) => Align::Max,
+                    (HAlign::General, Value::Bool(_) | Value::Error(_)) => Align::Center,
+                    (HAlign::General, _) => Align::Min,
+                };
+                let x = match align {
+                    Align::Min => rect.left() + 4.0,
+                    Align::Center => rect.center().x - g.size().x / 2.0,
+                    Align::Max => rect.right() - 4.0 - g.size().x,
+                };
+                let at = pos2(x, rect.center().y - g.size().y / 2.0);
+                let clipped =
+                    painter.with_clip_rect(rect.shrink2(vec2(1.0, 0.0)).intersect(visible));
+                clipped.galley(at, g.clone(), color);
+                if style.bold {
+                    // The bundled font has no bold weight: strike twice, slightly offset.
+                    clipped.galley(at + vec2(0.55, 0.0), g, color);
+                }
+            }
         }
 
         // Selection outline and cursor.
@@ -858,5 +875,47 @@ impl App {
         if rows || cols {
             ui.separator();
         }
+    }
+}
+
+fn rgb(c: crate::model::Rgb) -> Color32 {
+    Color32::from_rgb(c.0, c.1, c.2)
+}
+
+/// A text layout with the style's italic, underline and strikethrough.
+fn text_job(text: String, font: &FontId, color: Color32, style: &crate::model::Style) -> LayoutJob {
+    let line = |on: bool| {
+        if on {
+            Stroke::new(1.0, color)
+        } else {
+            Stroke::NONE
+        }
+    };
+    LayoutJob::single_section(
+        text,
+        TextFormat {
+            font_id: font.clone(),
+            color,
+            italics: style.italic,
+            underline: line(style.underline),
+            strikethrough: line(style.strike),
+            ..Default::default()
+        },
+    )
+}
+
+fn paint_borders(painter: &egui::Painter, rect: Rect, b: crate::model::Borders, stroke: Stroke) {
+    let r = rect.shrink(0.5);
+    if b.top {
+        painter.hline(r.x_range(), r.top(), stroke);
+    }
+    if b.bottom {
+        painter.hline(r.x_range(), r.bottom(), stroke);
+    }
+    if b.left {
+        painter.vline(r.left(), r.y_range(), stroke);
+    }
+    if b.right {
+        painter.vline(r.right(), r.y_range(), stroke);
     }
 }

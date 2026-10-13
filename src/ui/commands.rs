@@ -6,7 +6,7 @@ use egui::Context;
 use super::app::{App, ClipData};
 use super::selection::Selection;
 use crate::model::refs::{Axis, Structural};
-use crate::model::{self, Cell, Pos, Value, interpret_input, refs};
+use crate::model::{self, Borders, Cell, HAlign, Pos, Rgb, Style, Value, interpret_input, refs};
 
 impl App {
     pub(crate) fn sel_positions(&self) -> Vec<Pos> {
@@ -26,22 +26,43 @@ impl App {
             .collect()
     }
 
-    /// Clear contents, keeping number formats (like Excel's Delete key).
+    /// Clear contents, keeping formats and styles (like Excel's Delete key).
     pub(crate) fn clear_selection(&mut self) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter_map(|p| Some((self.active, p, s.cells.get(&p)?.formatting_only())))
+            .collect();
+        self.book.apply("Clear", edits);
+        self.data_changed();
+    }
+
+    /// Remove number formats and styles, keeping contents.
+    pub(crate) fn clear_formats(&mut self) {
         let s = self.sheet();
         let edits = self
             .sel_positions()
             .into_iter()
             .filter_map(|p| {
                 let cell = s.cells.get(&p)?;
-                let kept = (cell.fmt != model::NumFmt::General).then(|| Cell {
-                    raw: String::new(),
-                    fmt: cell.fmt,
-                });
-                Some((self.active, p, kept))
+                Some((self.active, p, Some(Cell::new(cell.raw.clone()))))
             })
             .collect();
-        self.book.apply("Clear", edits);
+        self.book.apply("Clear formats", edits);
+        self.data_changed();
+    }
+
+    /// Remove contents, formats and styles.
+    pub(crate) fn clear_all(&mut self) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter(|p| s.cells.contains_key(p))
+            .map(|p| (self.active, p, None))
+            .collect();
+        self.book.apply("Clear all", edits);
         self.data_changed();
     }
 
@@ -422,4 +443,106 @@ impl App {
         self.data_changed();
         self.scroll_to_cursor = true;
     }
+
+    /// Change the style of every selected cell (empty ones included). `f` gets
+    /// each cell's position so edge-aware changes like outlines are possible.
+    pub(crate) fn restyle(&mut self, label: &str, f: impl Fn(Pos, &mut Style)) {
+        let s = self.sheet();
+        let edits = self
+            .sel_positions()
+            .into_iter()
+            .filter_map(|p| {
+                let mut cell = s.cells.get(&p).cloned().unwrap_or_default();
+                let before = cell.style;
+                f(p, &mut cell.style);
+                (cell.style != before).then(|| (self.active, p, (!cell.is_blank()).then_some(cell)))
+            })
+            .collect();
+        self.book.apply(label, edits);
+        self.data_changed();
+    }
+
+    /// The style of the active cell, which the toolbar reflects.
+    pub(crate) fn cursor_style(&self) -> Style {
+        self.sheet()
+            .cells
+            .get(&self.sel.cursor)
+            .map(|c| c.style)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn toggle_bold(&mut self) {
+        let on = !self.cursor_style().bold;
+        self.restyle(if on { "Bold" } else { "Remove bold" }, |_, s| s.bold = on);
+    }
+
+    pub(crate) fn toggle_italic(&mut self) {
+        let on = !self.cursor_style().italic;
+        self.restyle(if on { "Italic" } else { "Remove italic" }, |_, s| {
+            s.italic = on
+        });
+    }
+
+    pub(crate) fn toggle_underline(&mut self) {
+        let on = !self.cursor_style().underline;
+        self.restyle(if on { "Underline" } else { "Remove underline" }, |_, s| {
+            s.underline = on
+        });
+    }
+
+    pub(crate) fn toggle_strike(&mut self) {
+        let on = !self.cursor_style().strike;
+        self.restyle(
+            if on {
+                "Strikethrough"
+            } else {
+                "Remove strikethrough"
+            },
+            |_, s| s.strike = on,
+        );
+    }
+
+    pub(crate) fn set_text_color(&mut self, color: Option<Rgb>) {
+        self.restyle("Text color", |_, s| s.color = color);
+    }
+
+    pub(crate) fn set_fill(&mut self, fill: Option<Rgb>) {
+        self.restyle("Fill color", |_, s| s.fill = fill);
+    }
+
+    pub(crate) fn set_align(&mut self, align: HAlign) {
+        self.restyle("Align", |_, s| s.align = align);
+    }
+
+    pub(crate) fn set_borders(&mut self, kind: BorderKind) {
+        let ((r0, c0), (r1, c1)) = self.sel.range();
+        self.restyle("Borders", |(r, c), s| {
+            let b = &mut s.borders;
+            match kind {
+                BorderKind::All => *b = Borders::ALL,
+                BorderKind::None => *b = Borders::NONE,
+                BorderKind::Outline => {
+                    b.top |= r == r0;
+                    b.bottom |= r == r1;
+                    b.left |= c == c0;
+                    b.right |= c == c1;
+                }
+                BorderKind::Top => b.top |= r == r0,
+                BorderKind::Bottom => b.bottom |= r == r1,
+                BorderKind::Left => b.left |= c == c0,
+                BorderKind::Right => b.right |= c == c1,
+            }
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BorderKind {
+    All,
+    Outline,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    None,
 }

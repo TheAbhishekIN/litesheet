@@ -54,6 +54,7 @@ fn rand_id() -> u64 {
 
 pub fn shot(h: &mut Harness<'_, App>, name: &str) {
     if let Ok(dir) = std::env::var("LITESHEET_SHOTS") {
+        h.run_steps(2); // pick up state changed directly through state_mut()
         let img = h.render().expect("render");
         img.save(std::path::Path::new(&dir).join(format!("{name}.png")))
             .unwrap();
@@ -91,9 +92,13 @@ pub fn key(h: &mut Harness<'_, App>, key: Key, modifiers: Modifiers) {
     h.run_steps(2);
 }
 
-/// Screen centre of cell (row, col) with the default layout (A1 at 100, 89).
+/// Vertical centre of the column-header strip with the default layout
+/// (menu bar, formatting toolbar and formula bar above it).
+pub const HEADER_Y: f32 = 105.0;
+
+/// Screen centre of cell (row, col) with the default layout.
 pub fn cell(r: u32, c: u32) -> Pos2 {
-    pos2(100.0 + 100.0 * c as f32, 89.0 + 22.0 * r as f32)
+    pos2(100.0 + 100.0 * c as f32, HEADER_Y + 22.0 * (r + 1) as f32)
 }
 
 pub fn display(h: &Harness<'_, App>, r: u32, c: u32) -> String {

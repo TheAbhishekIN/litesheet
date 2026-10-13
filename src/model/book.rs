@@ -385,7 +385,11 @@ impl Book {
 
     /// Set a cell from user-typed text (interprets dates and percentages).
     pub fn set_input(&mut self, sheet: usize, pos: Pos, input: &str) {
-        let cell = interpret_input(input, self.sheets[sheet].fmt(pos));
+        let existing = self.sheets[sheet].cells.get(&pos);
+        let style = existing.map(|c| c.style).unwrap_or_default();
+        let cell = interpret_input(input, self.sheets[sheet].fmt(pos))
+            .map(|c| Cell { style, ..c })
+            .or_else(|| existing.and_then(Cell::formatting_only));
         self.apply("Edit cell", vec![(sheet, pos, cell)]);
     }
 

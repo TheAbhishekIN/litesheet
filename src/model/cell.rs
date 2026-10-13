@@ -1,5 +1,6 @@
 //! Cells: raw user input, number formats, and interpreting typed text.
 
+use super::Style;
 use super::format::{fmt_number, parse_date, parse_time};
 
 /// Zero-based (row, col).
@@ -152,11 +153,12 @@ impl NumFmt {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Cell {
     /// What the user typed: `=SUM(A1:A3)`, `42`, `hello`, `'0042`.
     pub raw: String,
     pub fmt: NumFmt,
+    pub style: Style,
 }
 
 impl Cell {
@@ -164,15 +166,32 @@ impl Cell {
         Self {
             raw: raw.into(),
             fmt: NumFmt::General,
+            style: Style::default(),
         }
     }
     pub fn is_formula(&self) -> bool {
         self.fmt != NumFmt::Text && is_formula(&self.raw)
     }
 
-    /// True when the cell has neither content nor a number format.
+    pub fn with_fmt(raw: impl Into<String>, fmt: NumFmt) -> Self {
+        Self {
+            fmt,
+            ..Self::new(raw)
+        }
+    }
+
+    /// True when the cell has no content, number format or style.
     pub fn is_blank(&self) -> bool {
-        self.raw.is_empty() && self.fmt == NumFmt::General
+        self.raw.is_empty() && self.fmt == NumFmt::General && self.style.is_default()
+    }
+
+    /// The cell's formatting without its content (what Delete leaves behind).
+    pub fn formatting_only(&self) -> Option<Cell> {
+        let c = Cell {
+            raw: String::new(),
+            ..self.clone()
+        };
+        (!c.is_blank()).then_some(c)
     }
 }
 
@@ -189,7 +208,7 @@ pub fn interpret_input(input: &str, prev_fmt: NumFmt) -> Option<Cell> {
     if input.is_empty() {
         return None;
     }
-    let cell = |raw: String, fmt: NumFmt| Some(Cell { raw, fmt });
+    let cell = |raw: String, fmt: NumFmt| Some(Cell::with_fmt(raw, fmt));
     if prev_fmt == NumFmt::Text {
         return cell(input.to_string(), NumFmt::Text);
     }

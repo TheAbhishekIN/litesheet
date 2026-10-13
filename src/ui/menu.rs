@@ -99,6 +99,12 @@ impl App {
                 {
                     self.clear_selection();
                 }
+                if ui.button("Clear Formats").clicked() {
+                    self.clear_formats();
+                }
+                if ui.button("Clear All").clicked() {
+                    self.clear_all();
+                }
                 ui.separator();
                 if ui
                     .add(egui::Button::new("Fill Down").shortcut_text(sc_text(&ctx, Key::D, false)))
