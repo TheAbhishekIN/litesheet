@@ -7,11 +7,14 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow};
 use calamine::{Data, Reader, open_workbook_auto};
 use rust_xlsxwriter::{
-    Color, Format, FormatAlign, FormatBorder, FormatUnderline, Formula, Workbook as XlsxWorkbook,
+    Chart as XlsxChart, ChartType, Color, Format, FormatAlign, FormatBorder, FormatUnderline,
+    Formula, Workbook as XlsxWorkbook,
 };
 
 use super::xlsx_styles;
-use crate::model::{Book, Cell, HAlign, NumFmt, Pos, Style, Value, fmt_number, parse_literal};
+use crate::model::{
+    Book, Cell, Chart, ChartKind, HAlign, NumFmt, Pos, Style, Value, fmt_number, parse_literal,
+};
 
 /// Rough conversion between Excel character widths and our point widths.
 const PX_PER_CHAR: f32 = 7.5;
@@ -74,9 +77,9 @@ pub(super) fn load(path: &Path) -> Result<Book> {
                     cell.raw = text.to_string();
                 }
             }
-            widths.push((f.col_widths, f.merges, f.freeze));
+            widths.push((f.col_widths, f.merges, f.freeze, f.charts));
         } else {
-            widths.push((Vec::new(), Vec::new(), None));
+            widths.push((Vec::new(), Vec::new(), None, Vec::new()));
         }
         sheets.push((name, cells.into_iter().collect()));
     }
@@ -84,7 +87,8 @@ pub(super) fn load(path: &Path) -> Result<Book> {
         return Err(anyhow!("The workbook has no sheets"));
     }
     let mut book = Book::from_sheets(sheets);
-    for (sheet, (widths, merges, freeze)) in book.sheets.iter_mut().zip(widths) {
+    for (sheet, (widths, merges, freeze, charts)) in book.sheets.iter_mut().zip(widths) {
+        sheet.charts = charts;
         for (col, chars) in widths {
             sheet
                 .col_widths
@@ -193,6 +197,15 @@ pub(super) fn save(book: &Book, path: &Path) -> Result<()> {
                 (Value::Empty, None) => ws,
             };
         }
+        for chart in &sheet.charts {
+            if let Some(c) = excel_chart(chart) {
+                ws.insert_chart(
+                    chart.anchor.0,
+                    chart.anchor.1.min(u16::MAX as u32) as u16,
+                    &c,
+                )?;
+            }
+        }
     }
     wb.save(path)
         .with_context(|| format!("Couldn't write {}", path.display()))?;
@@ -243,4 +256,36 @@ fn excel_format(fmt: NumFmt, style: &Style) -> Format {
         f = f.set_border_right(FormatBorder::Thin);
     }
     f
+}
+
+/// A native Excel chart for a LiteSheet chart.
+fn excel_chart(chart: &Chart) -> Option<XlsxChart> {
+    if chart.series.is_empty() {
+        return None;
+    }
+    let mut c = XlsxChart::new(match chart.kind {
+        ChartKind::Column => ChartType::Column,
+        ChartKind::Bar => ChartType::Bar,
+        ChartKind::Line => ChartType::Line,
+        ChartKind::Area => ChartType::Area,
+        ChartKind::Pie => ChartType::Pie,
+        ChartKind::Scatter => ChartType::Scatter,
+    });
+    for s in &chart.series {
+        let series = c.add_series();
+        series.set_values(s.values.to_formula().as_str());
+        if let Some(cats) = &chart.categories {
+            series.set_categories(cats.to_formula().as_str());
+        }
+        match &s.name_ref {
+            Some(r) => series.set_name(format!("={}", r.to_formula()).as_str()),
+            None => series.set_name(s.name.as_str()),
+        };
+    }
+    if !chart.title.is_empty() {
+        c.title().set_name(&chart.title);
+    }
+    c.set_width(chart.size.0.round() as u32)
+        .set_height(chart.size.1.round() as u32);
+    Some(c)
 }

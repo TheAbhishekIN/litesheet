@@ -336,3 +336,37 @@ fn freeze_panes_follow_structure() {
     b.set_freeze(0, Freeze::default());
     assert!(!b.sheets[0].freeze.is_active());
 }
+
+#[test]
+fn charts_follow_structure_and_renames() {
+    use crate::model::{Chart, ChartKind, DataRef};
+    let mut b = Book::new_blank();
+    for (r, (m, v)) in [("Month", "Sales"), ("Jan", "10"), ("Feb", "12")]
+        .iter()
+        .enumerate()
+    {
+        b.set_input(0, (r as u32, 0), m);
+        b.set_input(0, (r as u32, 1), v);
+    }
+    let chart = Chart::from_block(&b.sheets[0], (0, 0), (2, 1), ChartKind::Column).unwrap();
+    b.set_charts(0, vec![chart], "Insert chart");
+    assert_eq!(b.undo_label(), Some("Insert chart"));
+
+    b.insert_rows(0, 0, 1).unwrap();
+    let c = &b.sheets[0].charts[0];
+    assert_eq!(c.series[0].values, DataRef::new("Sheet1", (2, 1), (3, 1)));
+    assert_eq!(c.anchor, (1, 3));
+    assert_eq!(c.data(&b).series[0].1, vec![Some(10.0), Some(12.0)]);
+
+    b.rename_sheet(0, "Data").unwrap();
+    assert_eq!(b.sheets[0].charts[0].series[0].values.sheet, "Data");
+    assert_eq!(b.sheets[0].charts[0].data(&b).categories, ["Jan", "Feb"]);
+    b.undo();
+    assert_eq!(b.sheets[0].charts[0].series[0].values.sheet, "Sheet1");
+
+    // Deleting all of the chart's data columns removes the chart.
+    b.delete_cols(0, 0, 2).unwrap();
+    assert!(b.sheets[0].charts.is_empty());
+    b.undo();
+    assert_eq!(b.sheets[0].charts.len(), 1);
+}

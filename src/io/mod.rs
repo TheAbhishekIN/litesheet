@@ -167,6 +167,65 @@ mod tests {
     }
 
     #[test]
+    fn charts_roundtrip() {
+        use crate::model::{Chart, ChartKind, DataRef};
+        let dir = std::env::temp_dir().join(format!("litesheet-chart-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut b = Book::new_blank();
+        let rows = [
+            ["Month", "Sales", "Costs"],
+            ["Jan", "10", "4"],
+            ["Feb", "12", "5"],
+            ["Mar", "9", "6"],
+        ];
+        for (r, row) in rows.iter().enumerate() {
+            for (c, v) in row.iter().enumerate() {
+                b.set_input(0, (r as u32, c as u32), v);
+            }
+        }
+        let mut column =
+            Chart::from_block(&b.sheets[0], (0, 0), (3, 2), ChartKind::Column).unwrap();
+        column.title = "Sales & costs".into();
+        let mut pie = Chart::from_block(&b.sheets[0], (0, 0), (3, 1), ChartKind::Pie).unwrap();
+        pie.anchor = (20, 1);
+        pie.size = (320.0, 240.0);
+        b.set_charts(0, vec![column.clone(), pie], "charts");
+        let path = dir.join("charts.xlsx");
+        save(&b, 0, &path).unwrap();
+
+        let l = load(&path).unwrap();
+        let charts = &l.sheets[0].charts;
+        assert_eq!(charts.len(), 2);
+        let c = charts.iter().find(|c| c.kind == ChartKind::Column).unwrap();
+        assert_eq!(c.title, "Sales & costs");
+        assert_eq!(c.anchor, column.anchor);
+        assert_eq!(c.categories, Some(DataRef::new("Sheet1", (1, 0), (3, 0))));
+        assert_eq!(c.series.len(), 2);
+        assert_eq!(c.series[1].values, DataRef::new("Sheet1", (1, 2), (3, 2)));
+        assert_eq!(
+            c.series[0].name_ref,
+            Some(DataRef::new("Sheet1", (0, 1), (0, 1)))
+        );
+        assert!(
+            (c.size.0 - 480.0).abs() < 2.0 && (c.size.1 - 288.0).abs() < 2.0,
+            "{:?}",
+            c.size
+        );
+        let p = charts.iter().find(|c| c.kind == ChartKind::Pie).unwrap();
+        assert_eq!(p.anchor, (20, 1));
+        assert!(
+            (p.size.0 - 320.0).abs() < 2.0 && (p.size.1 - 240.0).abs() < 2.0,
+            "{:?}",
+            p.size
+        );
+        assert_eq!(
+            p.data(&l).series[0].1,
+            vec![Some(10.0), Some(12.0), Some(9.0)]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn xlsx_and_csv_roundtrip() {
         let dir = std::env::temp_dir().join(format!("litesheet-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

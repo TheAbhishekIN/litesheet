@@ -26,12 +26,12 @@ enum Hit {
     Cell(u32, u32),
 }
 
-struct Layout {
+pub(super) struct Layout {
     origin: Pos2,
     viewport: Rect,
-    row_header_w: f32,
+    pub(super) row_header_w: f32,
     /// xs[c] = left edge of column c (content coords, excluding the row header).
-    xs: Vec<f32>,
+    pub(super) xs: Vec<f32>,
     n_view_rows: u32,
     /// Frozen view rows and columns, pinned to the top/left while scrolling.
     frozen_rows: u32,
@@ -39,7 +39,7 @@ struct Layout {
 }
 
 impl Layout {
-    fn col_at(&self, x: f32) -> u32 {
+    pub(super) fn col_at(&self, x: f32) -> u32 {
         match self.xs.binary_search_by(|v| v.partial_cmp(&x).unwrap()) {
             Ok(i) => i as u32,
             Err(i) => i.saturating_sub(1) as u32,
@@ -47,16 +47,16 @@ impl Layout {
         .min(self.xs.len().saturating_sub(2) as u32)
     }
 
-    fn frozen_w(&self) -> f32 {
+    pub(super) fn frozen_w(&self) -> f32 {
         self.xs[(self.frozen_cols as usize).min(self.xs.len() - 1)]
     }
 
-    fn frozen_h(&self) -> f32 {
+    pub(super) fn frozen_h(&self) -> f32 {
         self.frozen_rows as f32 * ROW_H
     }
 
     /// Frozen columns ignore horizontal scrolling, frozen rows vertical.
-    fn x_origin(&self, c: u32) -> f32 {
+    pub(super) fn x_origin(&self, c: u32) -> f32 {
         if c < self.frozen_cols {
             self.left()
         } else {
@@ -64,7 +64,7 @@ impl Layout {
         }
     }
 
-    fn y_origin(&self, vi: u32) -> f32 {
+    pub(super) fn y_origin(&self, vi: u32) -> f32 {
         if vi < self.frozen_rows {
             self.top()
         } else {
@@ -73,7 +73,7 @@ impl Layout {
     }
 
     /// Screen rect of a cell in view row `vi`, column `c`.
-    fn cell_rect(&self, vi: u32, c: u32) -> Rect {
+    pub(super) fn cell_rect(&self, vi: u32, c: u32) -> Rect {
         let x = self.x_origin(c) + self.row_header_w;
         let y0 = self.y_origin(vi) + HEADER_H + vi as f32 * ROW_H;
         Rect::from_min_max(
@@ -82,25 +82,25 @@ impl Layout {
         )
     }
 
-    fn top(&self) -> f32 {
+    pub(super) fn top(&self) -> f32 {
         self.origin.y + self.viewport.min.y
     }
 
-    fn left(&self) -> f32 {
+    pub(super) fn left(&self) -> f32 {
         self.origin.x + self.viewport.min.x
     }
 
     /// Where the scrolling part of the grid starts on screen.
-    fn scroll_left(&self) -> f32 {
+    pub(super) fn scroll_left(&self) -> f32 {
         self.left() + self.row_header_w + self.frozen_w()
     }
 
-    fn scroll_top(&self) -> f32 {
+    pub(super) fn scroll_top(&self) -> f32 {
         self.top() + HEADER_H + self.frozen_h()
     }
 
     /// The screen area of a region: frozen or scrolling rows × columns.
-    fn region_clip(&self, visible: Rect, frozen_row: bool, frozen_col: bool) -> Rect {
+    pub(super) fn region_clip(&self, visible: Rect, frozen_row: bool, frozen_col: bool) -> Rect {
         let (x0, x1) = if frozen_col {
             (self.left() + self.row_header_w, self.scroll_left())
         } else {
@@ -115,7 +115,7 @@ impl Layout {
     }
 
     /// The view row under screen `y` (inside the cell area).
-    fn row_at_y(&self, y: f32) -> u32 {
+    pub(super) fn row_at_y(&self, y: f32) -> u32 {
         let base = if y < self.scroll_top() {
             self.top()
         } else {
@@ -126,7 +126,7 @@ impl Layout {
     }
 
     /// The column under screen `x` (right of the row header).
-    fn col_at_x(&self, x: f32) -> u32 {
+    pub(super) fn col_at_x(&self, x: f32) -> u32 {
         let base = if x < self.scroll_left() {
             self.left()
         } else {
@@ -241,6 +241,7 @@ impl App {
             && ctx.input(|i| i.pointer.primary_pressed())
             && let Some(p) = pointer
         {
+            self.selected_chart = None;
             let hit = self.hit_test(l, p);
             let pointing = self.wants_reference();
             match hit {
@@ -438,6 +439,7 @@ impl App {
         }
 
         self.paint(ui, l, visible);
+        self.chart_layer(ui, l, visible);
         self.cell_editor(ui, l);
         self.paint_headers(ui, l, visible);
     }

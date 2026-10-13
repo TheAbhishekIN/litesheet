@@ -11,7 +11,7 @@ use formualizer::workbook::{Workbook as Engine, WorkbookConfig};
 use super::format::date_to_serial;
 use super::refs::{self, Axis, Structural};
 use super::sheet::{Freeze, Merge, merge_contains, merges_overlap};
-use super::{Cell, HAlign, NumFmt, Pos, Sheet, Value, interpret_input, parse_literal};
+use super::{Cell, Chart, HAlign, NumFmt, Pos, Sheet, Value, interpret_input, parse_literal};
 
 #[derive(Clone, Debug)]
 pub struct CellChange {
@@ -43,6 +43,11 @@ pub enum MetaChange {
         sheet: usize,
         old: Freeze,
         new: Freeze,
+    },
+    Charts {
+        sheet: usize,
+        old: Vec<Chart>,
+        new: Vec<Chart>,
     },
 }
 
@@ -186,7 +191,24 @@ impl Book {
                 }
             }
         }
-        self.commit("Rename sheet", edits, vec![rename]);
+        let mut meta = vec![rename];
+        for si in 0..self.sheets.len() {
+            let old_charts = self.sheets[si].charts.clone();
+            let new_charts: Vec<Chart> = old_charts
+                .iter()
+                .map(|c| c.renamed(&old, new_name))
+                .collect();
+            if new_charts != old_charts {
+                let m = MetaChange::Charts {
+                    sheet: si,
+                    old: old_charts,
+                    new: new_charts,
+                };
+                let _ = self.apply_meta(&m, false);
+                meta.push(m);
+            }
+        }
+        self.commit("Rename sheet", edits, meta);
         Ok(())
     }
 
@@ -315,6 +337,24 @@ impl Book {
             meta.push(m);
         }
 
+        // Charts anywhere may plot data on this sheet; their anchors on it move too.
+        for si in 0..self.sheets.len() {
+            let old = self.sheets[si].charts.clone();
+            let new: Vec<Chart> = old
+                .iter()
+                .filter_map(|c| c.adjusted(&change, si, sheet))
+                .collect();
+            if new != old {
+                let m = MetaChange::Charts {
+                    sheet: si,
+                    old,
+                    new,
+                };
+                self.apply_meta(&m, false)?;
+                meta.push(m);
+            }
+        }
+
         // The freeze line moves with rows/columns inserted or deleted above/left of it.
         let old_freeze = self.sheets[sheet].freeze;
         let line = |n: u32| -> u32 {
@@ -437,6 +477,21 @@ impl Book {
         } else {
             "Unfreeze panes"
         };
+        self.commit(label, Vec::new(), vec![meta]);
+    }
+
+    /// Replace a sheet's charts (add, move, resize, edit or delete) as one undoable step.
+    pub fn set_charts(&mut self, sheet: usize, charts: Vec<Chart>, label: &str) {
+        let old = self.sheets[sheet].charts.clone();
+        if old == charts {
+            return;
+        }
+        let meta = MetaChange::Charts {
+            sheet,
+            old,
+            new: charts,
+        };
+        let _ = self.apply_meta(&meta, false);
         self.commit(label, Vec::new(), vec![meta]);
     }
 
@@ -623,6 +678,9 @@ impl Book {
             MetaChange::Freeze { sheet, old, new } => {
                 self.sheets[*sheet].freeze = if backwards { *old } else { *new };
             }
+            MetaChange::Charts { sheet, old, new } => {
+                self.sheets[*sheet].charts = if backwards { old } else { new }.clone();
+            }
         }
         self.dirty = true;
         Ok(())
@@ -729,7 +787,8 @@ impl MetaChange {
             MetaChange::RenameSheet { sheet, .. }
             | MetaChange::ColWidths { sheet, .. }
             | MetaChange::Merges { sheet, .. }
-            | MetaChange::Freeze { sheet, .. } => *sheet,
+            | MetaChange::Freeze { sheet, .. }
+            | MetaChange::Charts { sheet, .. } => *sheet,
         }
     }
 }

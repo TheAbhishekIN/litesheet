@@ -28,6 +28,7 @@ model/
 ├── value.rs    Value (computed result), parse_literal(), compare_values()
 ├── format.rs   number/date/percent display, Excel date serials
 ├── style.rs    Style: font emphasis, colours, alignment, borders
+├── chart.rs    Chart: kind, title, category and series ranges (DataRef), anchor, size
 ├── sheet.rs    Sheet: cells, values, column widths, used extent
 ├── book.rs     Book: sheets, undo/redo, formula-engine bridge
 ├── refs.rs     A1 references, shift_formula() for relative references
@@ -119,6 +120,8 @@ The spreadsheet data sent with each task is built in `ui/ai_panel.rs` (`ai_conte
 | `keyboard.rs` | Every keyboard shortcut and grid navigation |
 | `menu.rs` | The menu bar |
 | `toolbar.rs` | The formatting toolbar (emphasis, colours, alignment, borders, number format) |
+| `chart.rs` | Drawing charts with the egui painter (axes, legend, six chart types) |
+| `chart_layer.rs` | Charts on the sheet: select, move, resize, delete, and the Insert/Edit Chart window |
 | `formula_bar.rs` | Name box and formula bar |
 | `search.rs` | The find bar |
 | `filtering.rs` | The filter window and applying filters |
@@ -172,3 +175,4 @@ An edit is `App::edit: Option<EditState>`. The cell editor and the formula bar e
 | Change what the AI sees | `ai_context` in `ui/ai_panel.rs` |
 | Add an AI task | `Task` in `ai/mod.rs`, then the UI and handling in `ui/ai_panel.rs` |
 | Change grid drawing | `paint` and `paint_headers` in `ui/grid.rs` |
+| Add a chart type | `ChartKind` in `model/chart.rs`, drawing in `ui/chart.rs`, `excel_chart` in `io/xlsx.rs`, `parse_chart` in `io/xlsx_styles.rs` |

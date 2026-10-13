@@ -1,6 +1,6 @@
-//! Reads cell styles, number formats and column widths from an `.xlsx`
-//! package. calamine reads values and formulas but not formatting, so this
-//! walks the XML parts it skips: `styles.xml`, the theme and each worksheet.
+//! Reads what calamine doesn't from an `.xlsx` package: cell styles, number
+//! formats, column widths, merged cells, frozen panes and charts. It walks
+//! `styles.xml`, the theme, each worksheet and its drawings and charts.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -10,7 +10,10 @@ use anyhow::{Context, Result};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
-use crate::model::{Borders, Currency, HAlign, NumFmt, Pos, Rgb, Style};
+use crate::model::{
+    Borders, Chart, ChartKind, Currency, DEFAULT_CHART_SIZE, DataRef, HAlign, NumFmt, Pos, Rgb,
+    Series, Style,
+};
 
 /// Formatting found on one worksheet.
 #[derive(Debug, Default)]
@@ -23,6 +26,7 @@ pub struct SheetFormatting {
     pub merges: Vec<(Pos, Pos)>,
     /// Frozen (rows, columns), if the sheet has frozen panes.
     pub freeze: Option<(u32, u32)>,
+    pub charts: Vec<Chart>,
 }
 
 /// Formatting for every sheet, keyed by sheet name.
@@ -56,7 +60,9 @@ pub fn read(path: &Path) -> Result<HashMap<String, SheetFormatting>> {
             None => format!("xl/{target}"),
         };
         if let Some(xml) = part(&path) {
-            out.insert(name, parse_worksheet(&xml, &styles));
+            let mut f = parse_worksheet(&xml, &styles);
+            f.charts = read_charts(&mut part, &path, &f.col_widths);
+            out.insert(name, f);
         }
     }
     Ok(out)
@@ -498,6 +504,324 @@ fn currency_symbol(c: char) -> Option<Currency> {
         .find(|cur| cur.symbol().starts_with(c))
 }
 
+/* ----------------------------------- charts ----------------------------------- */
+
+/// Relationship id → (type, target).
+fn parse_typed_relationships(xml: &str) -> HashMap<String, (String, String)> {
+    let mut map = HashMap::new();
+    for_each_element(xml, |name, e, _| {
+        if name == "Relationship"
+            && let (Some(id), Some(target)) = (attr(e, "Id"), attr(e, "Target"))
+        {
+            map.insert(id, (attr(e, "Type").unwrap_or_default(), target));
+        }
+    });
+    map
+}
+
+/// `xl/worksheets/sheet1.xml` → `xl/worksheets/_rels/sheet1.xml.rels`.
+fn rels_path(part: &str) -> String {
+    match part.rsplit_once('/') {
+        Some((dir, file)) => format!("{dir}/_rels/{file}.rels"),
+        None => format!("_rels/{part}.rels"),
+    }
+}
+
+/// Resolve a relationship target relative to the part that refers to it.
+fn resolve_target(from_part: &str, target: &str) -> String {
+    if let Some(abs) = target.strip_prefix('/') {
+        return abs.to_string();
+    }
+    let mut parts: Vec<&str> = from_part
+        .rsplit_once('/')
+        .map_or(vec![], |(d, _)| d.split('/').collect());
+    for seg in target.split('/') {
+        match seg {
+            ".." => {
+                parts.pop();
+            }
+            "." | "" => {}
+            s => parts.push(s),
+        }
+    }
+    parts.join("/")
+}
+
+/// A node seen while walking XML with [`walk`].
+enum Node<'a, 'e> {
+    Start(&'a BytesStart<'e>),
+    Text(&'a str),
+    End,
+}
+
+/// Walk XML, calling `f` with the path of open element names for every start
+/// element, text node and end element.
+fn walk(xml: &str, mut f: impl FnMut(&[String], Node)) {
+    let mut reader = Reader::from_str(xml);
+    let mut stack: Vec<String> = Vec::new();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                stack.push(e.local_name().as_ref().to_string());
+                f(&stack, Node::Start(&e));
+            }
+            Ok(Event::Empty(e)) => {
+                stack.push(e.local_name().as_ref().to_string());
+                f(&stack, Node::Start(&e));
+                f(&stack, Node::End);
+                stack.pop();
+            }
+            Ok(Event::Text(t)) => f(&stack, Node::Text(&t.xml_content(XmlVersion::Implicit1_0))),
+            Ok(Event::GeneralRef(r)) => {
+                // Entities arrive separately (&amp; → &).
+                let s = match r.as_ref() {
+                    "amp" => "&",
+                    "lt" => "<",
+                    "gt" => ">",
+                    "quot" => "\"",
+                    "apos" => "'",
+                    _ => "",
+                };
+                f(&stack, Node::Text(s));
+            }
+            Ok(Event::End(_)) => {
+                f(&stack, Node::End);
+                stack.pop();
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct Marker {
+    col: u32,
+    col_off: i64,
+    row: u32,
+    row_off: i64,
+}
+
+/// A drawing anchor: where a chart sits and which chart part it shows.
+#[derive(Default)]
+struct Anchor {
+    from: Marker,
+    to: Option<Marker>,
+    /// Size in EMU (one-cell anchors).
+    ext: Option<(f64, f64)>,
+    chart_rel: String,
+}
+
+/// A chart series as written in the XML, before references are parsed.
+#[derive(Default)]
+struct RawSeries {
+    name_ref: Option<String>,
+    name: Option<String>,
+    categories: Option<String>,
+    values: Option<String>,
+}
+
+const EMU_PER_PX: f64 = 9525.0;
+
+/// Charts placed on a worksheet, following worksheet → drawing → chart parts.
+fn read_charts(
+    part: &mut impl FnMut(&str) -> Option<String>,
+    sheet_path: &str,
+    col_widths: &[(u32, f64)],
+) -> Vec<Chart> {
+    let Some(rels) = part(&rels_path(sheet_path)) else {
+        return Vec::new();
+    };
+    let mut charts = Vec::new();
+    for (kind, target) in parse_typed_relationships(&rels).into_values() {
+        if !kind.ends_with("/drawing") {
+            continue;
+        }
+        let drawing_path = resolve_target(sheet_path, &target);
+        let Some(drawing) = part(&drawing_path) else {
+            continue;
+        };
+        let drawing_rels = part(&rels_path(&drawing_path))
+            .map(|x| parse_typed_relationships(&x))
+            .unwrap_or_default();
+
+        // Anchors: (from, to or size in EMU, chart relationship id).
+        let mut anchors: Vec<Anchor> = Vec::new();
+        let mut cur: Option<Anchor> = None;
+        walk(&drawing, |path, node| match node {
+            Node::Start(e) => match path.last().map(String::as_str).unwrap_or("") {
+                "twoCellAnchor" | "oneCellAnchor" => cur = Some(Anchor::default()),
+                "to" => {
+                    if let Some(c) = cur.as_mut() {
+                        c.to = Some(Marker::default());
+                    }
+                }
+                "ext"
+                    if path.iter().any(|p| p == "oneCellAnchor")
+                        && !path.iter().any(|p| p == "graphicFrame") =>
+                {
+                    let n = |a| attr(e, a).and_then(|v| v.parse::<f64>().ok());
+                    if let (Some(c), Some(cx), Some(cy)) = (cur.as_mut(), n("cx"), n("cy")) {
+                        c.ext = Some((cx, cy));
+                    }
+                }
+                "chart" => {
+                    if let (Some(c), Some(id)) = (cur.as_mut(), attr(e, "id")) {
+                        c.chart_rel = id;
+                    }
+                }
+                _ => {}
+            },
+            Node::Text(t) => {
+                let (Some(c), n) = (cur.as_mut(), path.len()) else {
+                    return;
+                };
+                if n < 2 {
+                    return;
+                }
+                let marker = match path[n - 2].as_str() {
+                    "from" => &mut c.from,
+                    "to" => c.to.get_or_insert_with(Marker::default),
+                    _ => return,
+                };
+                let v: i64 = t.trim().parse().unwrap_or(0);
+                match path[n - 1].as_str() {
+                    "col" => marker.col = v.max(0) as u32,
+                    "colOff" => marker.col_off = v,
+                    "row" => marker.row = v.max(0) as u32,
+                    "rowOff" => marker.row_off = v,
+                    _ => {}
+                }
+            }
+            Node::End => {
+                if matches!(
+                    path.last().map(String::as_str),
+                    Some("twoCellAnchor" | "oneCellAnchor")
+                ) && let Some(c) = cur.take()
+                {
+                    anchors.push(c);
+                }
+            }
+        });
+
+        for Anchor {
+            from,
+            to,
+            ext,
+            chart_rel,
+        } in anchors
+        {
+            let Some((_, chart_target)) = drawing_rels.get(&chart_rel) else {
+                continue;
+            };
+            let chart_path = resolve_target(&drawing_path, chart_target);
+            let Some(xml) = part(&chart_path) else {
+                continue;
+            };
+            let Some(mut chart) = parse_chart(&xml) else {
+                continue;
+            };
+            chart.anchor = (from.row, from.col);
+            chart.size = match (to, ext) {
+                (_, Some((cx, cy))) => ((cx / EMU_PER_PX) as f32, (cy / EMU_PER_PX) as f32),
+                (Some(to), None) => anchor_size(from, to, col_widths),
+                _ => DEFAULT_CHART_SIZE,
+            };
+            charts.push(chart);
+        }
+    }
+    charts
+}
+
+/// Size of a two-cell anchor using Excel's default metrics (64 px columns
+/// unless set, 20 px rows), which is how the anchor was computed.
+fn anchor_size(from: Marker, to: Marker, col_widths: &[(u32, f64)]) -> (f32, f32) {
+    let col_px = |c: u32| {
+        col_widths
+            .iter()
+            .find(|(col, _)| *col == c)
+            .map_or(64.0, |(_, w)| (w * 7.0 + 5.0).floor())
+    };
+    let w: f64 = (from.col..to.col).map(col_px).sum::<f64>()
+        + (to.col_off - from.col_off) as f64 / EMU_PER_PX;
+    let h = (to.row - from.row) as f64 * 20.0 + (to.row_off - from.row_off) as f64 / EMU_PER_PX;
+    (w.max(120.0) as f32, h.max(80.0) as f32)
+}
+
+/// Kind, title and series of a chart part (`xl/charts/chartN.xml`).
+fn parse_chart(xml: &str) -> Option<Chart> {
+    let mut kind = None;
+    let mut bar_horizontal = false;
+    let mut title = String::new();
+    let mut series: Vec<RawSeries> = Vec::new();
+    walk(xml, |path, node| match node {
+        Node::Start(e) => match path.last().map(String::as_str).unwrap_or("") {
+            k @ ("barChart" | "bar3DChart" | "lineChart" | "line3DChart" | "pieChart"
+            | "pie3DChart" | "doughnutChart" | "scatterChart" | "areaChart"
+            | "area3DChart") => {
+                kind.get_or_insert(match k {
+                    "barChart" | "bar3DChart" => ChartKind::Column,
+                    "lineChart" | "line3DChart" => ChartKind::Line,
+                    "pieChart" | "pie3DChart" | "doughnutChart" => ChartKind::Pie,
+                    "scatterChart" => ChartKind::Scatter,
+                    _ => ChartKind::Area,
+                });
+            }
+            "barDir" => bar_horizontal |= attr(e, "val").as_deref() == Some("bar"),
+            "ser" => series.push(RawSeries::default()),
+            _ => {}
+        },
+        Node::Text(t) => {
+            let has = |n: &str| path.iter().any(|p| p == n);
+            let leaf = path.last().map(String::as_str).unwrap_or("");
+            if has("title") && !has("ser") && leaf == "t" {
+                title.push_str(t);
+                return;
+            }
+            let Some(s) = series.last_mut() else { return };
+            let append =
+                |slot: &mut Option<String>| slot.get_or_insert_with(String::new).push_str(t);
+            match leaf {
+                "f" if has("tx") => append(&mut s.name_ref),
+                "v" if has("tx") => append(&mut s.name),
+                "f" if has("cat") || has("xVal") => append(&mut s.categories),
+                "f" if has("val") || has("yVal") => append(&mut s.values),
+                _ => {}
+            }
+        }
+        Node::End => {}
+    });
+    let mut kind = kind?;
+    if kind == ChartKind::Column && bar_horizontal {
+        kind = ChartKind::Bar;
+    }
+    let categories = series
+        .iter()
+        .find_map(|s| s.categories.as_deref().and_then(DataRef::parse));
+    let series: Vec<Series> = series
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, raw)| {
+            Some(Series {
+                name_ref: raw.name_ref.as_deref().and_then(DataRef::parse),
+                name: raw.name.unwrap_or_else(|| format!("Series {}", i + 1)),
+                values: DataRef::parse(raw.values.as_deref()?)?,
+            })
+        })
+        .collect();
+    if series.is_empty() {
+        return None;
+    }
+    Some(Chart {
+        kind,
+        title,
+        categories,
+        series,
+        anchor: (0, 0),
+        size: DEFAULT_CHART_SIZE,
+    })
+}
+
 /* --------------------------------- worksheets --------------------------------- */
 
 fn parse_worksheet(xml: &str, styles: &Styles) -> SheetFormatting {
@@ -661,6 +985,37 @@ mod tests {
             "only custom widths"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn excel_chart_xml() {
+        let xml = r#"<c:chartSpace xmlns:c="c" xmlns:a="a"><c:chart>
+            <c:title><c:tx><c:rich><a:p><a:r><a:t>Revenue &amp; </a:t></a:r><a:r><a:t>Costs</a:t></a:r></a:p></c:rich></c:tx></c:title>
+            <c:plotArea><c:barChart><c:barDir val="bar"/><c:grouping val="clustered"/>
+              <c:ser><c:idx val="0"/><c:tx><c:strRef><c:f>'Q Data'!$B$1</c:f><c:strCache><c:pt idx="0"><c:v>Revenue</c:v></c:pt></c:strCache></c:strRef></c:tx>
+                <c:cat><c:strRef><c:f>'Q Data'!$A$2:$A$5</c:f></c:strRef></c:cat>
+                <c:val><c:numRef><c:f>'Q Data'!$B$2:$B$5</c:f></c:numRef></c:val></c:ser>
+              <c:ser><c:idx val="1"/><c:tx><c:v>Literal name</c:v></c:tx>
+                <c:val><c:numRef><c:f>'Q Data'!$C$2:$C$5</c:f></c:numRef></c:val></c:ser>
+            </c:barChart></c:plotArea></c:chart></c:chartSpace>"#;
+        let c = parse_chart(xml).unwrap();
+        assert_eq!(c.kind, ChartKind::Bar);
+        assert_eq!(c.title, "Revenue & Costs");
+        assert_eq!(c.categories, Some(DataRef::new("Q Data", (1, 0), (4, 0))));
+        assert_eq!(
+            c.series[0].name_ref,
+            Some(DataRef::new("Q Data", (0, 1), (0, 1)))
+        );
+        assert_eq!(c.series[1].name, "Literal name");
+        assert_eq!(c.series[1].values, DataRef::new("Q Data", (1, 2), (4, 2)));
+        assert_eq!(
+            resolve_target("xl/drawings/drawing1.xml", "../charts/chart1.xml"),
+            "xl/charts/chart1.xml"
+        );
+        assert_eq!(
+            rels_path("xl/worksheets/sheet2.xml"),
+            "xl/worksheets/_rels/sheet2.xml.rels"
+        );
     }
 
     #[test]
