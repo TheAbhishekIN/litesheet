@@ -5,8 +5,13 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # egui crates must move together.
       egui:
         patterns: ["egui*", "eframe"]
+      # Everything else: one weekly PR for minor and patch releases.
+      rust-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

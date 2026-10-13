@@ -14,30 +14,30 @@ exclude = ["docs/screenshots/*", "dist/*"]
 
 [dependencies]
 # UI
-eframe = "0.36"
-egui = "0.36"
-rfd = "0.17"
+eframe = "0.36.2"
+egui = "0.36.2"
+rfd = "0.17.2"
 
 # Spreadsheet engine and file formats
-formualizer = "0.11"
-calamine = "0.36"
-rust_xlsxwriter = "0.99"
-csv = "1.4"
-chrono = "0.4"
+formualizer = "0.11.1"
+calamine = "0.36.1"
+rust_xlsxwriter = "0.99.1"
+csv = "1.4.0"
+chrono = "0.4.45"
 
 # AI (Bring Your Own Key)
-reqwest = { version = "0.13", features = ["json"] }
-tokio = { version = "1", features = ["rt-multi-thread"] }
-keyring = "4"
+reqwest = { version = "0.13.5", features = ["json"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread"] }
+keyring = "4.2.0"
 
 # Utilities
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 
 [dev-dependencies]
-egui_kittest = { version = "0.36", features = ["eframe", "wgpu", "snapshot"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 [profile.release]
 lto = "thin"
