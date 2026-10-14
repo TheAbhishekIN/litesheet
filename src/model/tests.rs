@@ -370,3 +370,31 @@ fn charts_follow_structure_and_renames() {
     b.undo();
     assert_eq!(b.sheets[0].charts.len(), 1);
 }
+
+#[test]
+fn bulk_loaded_sheets_calculate() {
+    let cells = vec![
+        ((0, 0), Cell::new("Item")),
+        ((0, 1), Cell::new("Qty")),
+        ((1, 0), Cell::new("Apples")),
+        ((1, 1), Cell::new("3")),
+        ((2, 1), Cell::new("4.5")),
+        ((3, 1), Cell::new("TRUE")),
+        ((5, 1), Cell::new("=SUM(B2:B3)*2")),
+        ((5, 2), Cell::new("=COUNTA(A1:A3)")),
+        ((5, 3), Cell::new("=Other!A1+1")),
+    ];
+    let other = vec![((0, 0), Cell::new("41"))];
+    let mut b = Book::from_sheets(vec![("Data".into(), cells), ("Other".into(), other)]);
+    let s = &b.sheets[0];
+    assert_eq!((s.n_rows, s.n_cols), (6, 4));
+    assert_eq!(s.display((1, 0)), "Apples");
+    assert_eq!(s.display((5, 1)), "15");
+    assert_eq!(s.display((5, 2)), "2");
+    assert_eq!(s.display((5, 3)), "42");
+    // Edits after a bulk load flow through to dependents.
+    b.set_input(0, (1, 1), "10");
+    assert_eq!(b.sheets[0].display((5, 1)), "29");
+    b.set_input(1, (0, 0), "1");
+    assert_eq!(b.sheets[0].display((5, 3)), "2");
+}
