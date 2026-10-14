@@ -276,6 +276,8 @@ impl App {
                     }
                 }
                 ui.separator();
+                self.update_menu(ui);
+                ui.separator();
                 if ui.button("Buy Me a Coffee…").clicked() {
                     ctx.open_url(egui::OpenUrl::new_tab(SUPPORT_URL));
                 }
@@ -296,6 +298,7 @@ impl App {
                 {
                     ctx.open_url(egui::OpenUrl::new_tab(SUPPORT_URL));
                 }
+                self.update_button(ui);
             });
         });
     }

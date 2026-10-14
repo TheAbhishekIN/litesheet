@@ -8,11 +8,14 @@
 //! - [`ai`]: the OpenAI-compatible client, prompts and key storage.
 //! - [`ui`]: the egui application.
 //! - [`platform`]: OS integration (opening files from Finder).
+//! - [`update`]: finding, downloading and installing new versions.
 
 pub mod ai;
+pub mod config;
 pub mod io;
 pub mod model;
 pub mod platform;
 pub mod ui;
+pub mod update;
 
 pub use ui::App;
