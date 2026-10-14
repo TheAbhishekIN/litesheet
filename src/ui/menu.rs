@@ -2,7 +2,7 @@
 
 use egui::{Key, KeyboardShortcut, Modifiers, RichText};
 
-use super::app::{App, Pending};
+use super::app::App;
 use super::util::sc_text;
 use super::{ISSUES_URL, REPO_URL, SUPPORT_URL, WEBSITE_URL};
 use crate::ai;
@@ -18,13 +18,19 @@ impl App {
                     .add(egui::Button::new("New").shortcut_text(sc_text(&ctx, Key::N, false)))
                     .clicked()
                 {
-                    self.request(Pending::New, &ctx);
+                    self.new_doc();
                 }
                 if ui
                     .add(egui::Button::new("Open…").shortcut_text(sc_text(&ctx, Key::O, false)))
                     .clicked()
                 {
-                    self.request(Pending::Open, &ctx);
+                    self.open_dialog(&ctx);
+                }
+                if ui
+                    .add(egui::Button::new("Close").shortcut_text(sc_text(&ctx, Key::W, false)))
+                    .clicked()
+                {
+                    self.request_close_doc(&ctx);
                 }
                 ui.separator();
                 if ui
@@ -44,7 +50,7 @@ impl App {
                 }
                 ui.separator();
                 if ui.button("Quit").clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.request_quit(&ctx);
                 }
             });
             ui.menu_button("Edit", |ui| {

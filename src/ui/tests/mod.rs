@@ -4,6 +4,7 @@
 
 mod ai;
 mod docs_assets;
+mod documents;
 mod interaction;
 mod perf;
 

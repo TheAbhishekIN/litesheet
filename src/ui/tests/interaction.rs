@@ -480,7 +480,7 @@ fn insert_move_and_delete_a_chart() {
 }
 
 #[test]
-fn files_opened_from_finder_respect_unsaved_changes() {
+fn files_opened_from_finder_open_in_a_new_tab() {
     let dir = std::env::temp_dir().join(format!("litesheet-finder-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let other = dir.join("budget.csv");
@@ -492,12 +492,9 @@ fn files_opened_from_finder_respect_unsaved_changes() {
     key(&mut h, Key::Enter, Modifiers::NONE);
     assert!(h.state().book.dirty);
 
-    // macOS asks us to open another file: unsaved work triggers the prompt.
+    // macOS asks us to open another file: it gets its own tab, and the
+    // unsaved workbook stays open beside it.
     crate::platform::simulate_open([other.clone()]);
-    h.run_steps(3);
-    h.get_by_label_contains("Save changes to"); // panics if the prompt is missing
-    assert_eq!(display(&h, 1, 1), "edited", "nothing replaced yet");
-    h.get_by_label("Don't Save").click();
     for _ in 0..50 {
         h.run_steps(2);
         if h.state().sheet().name == "budget" {
@@ -506,6 +503,10 @@ fn files_opened_from_finder_respect_unsaved_changes() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     assert_eq!(display(&h, 1, 1), "1200");
+    assert_eq!(h.state().docs.len(), 2);
+    h.state_mut().switch_doc(0);
+    assert_eq!(display(&h, 1, 1), "edited");
+    assert!(h.state().book.dirty);
     std::fs::remove_dir_all(&dir).ok();
 }
 

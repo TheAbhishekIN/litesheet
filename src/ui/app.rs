@@ -2,6 +2,7 @@
 //! across the sibling modules (editing, commands, files, keyboard, …), each
 //! adding methods to [`App`].
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
@@ -38,15 +39,17 @@ pub(crate) struct ClipData {
     pub(crate) sheet: usize,
     pub(crate) source: Selection,
     pub(crate) cut: bool,
+    /// The workbook it was copied from.
+    pub(crate) doc: u64,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+/// What the "Save changes?" dialog is asking on behalf of.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Pending {
-    New,
-    Open,
-    /// Open this file (from Finder or a drop), once unsaved changes are dealt with.
-    OpenFile(PathBuf),
-    Close,
+    /// Closing the active workbook's tab.
+    CloseDoc,
+    /// Quitting; the dialog repeats for each workbook with unsaved changes.
+    Quit,
 }
 
 pub struct FilterPopup {
@@ -85,6 +88,13 @@ pub struct App {
     pub(crate) rename: Option<(usize, String)>,
     pub(crate) status: Option<(String, Instant, bool)>,
     pub(crate) pending: Option<Pending>,
+    /// Every open workbook; the active one's state is on `App` itself and
+    /// its slot here is a placeholder (see `documents`).
+    pub(crate) docs: Vec<super::documents::Doc>,
+    pub(crate) current: usize,
+    pub(crate) next_doc_id: u64,
+    /// Workbooks whose changes the user chose not to save while quitting.
+    pub(crate) discarded: HashSet<u64>,
     pub(crate) allow_close: bool,
     pub(crate) loading: Option<super::files::Loading>,
     pub(crate) clip: Option<ClipData>,
@@ -129,6 +139,10 @@ impl App {
             rename: None,
             status: None,
             pending: None,
+            docs: vec![super::documents::Doc::new(0, Book::new_blank())],
+            current: 0,
+            next_doc_id: 0,
+            discarded: HashSet::new(),
             allow_close: false,
             loading: None,
             clip: None,
@@ -141,7 +155,7 @@ impl App {
             ai_rx,
         };
         if let Some(path) = open {
-            app.start_load(path, &cc.egui_ctx);
+            app.open_path(path, &cc.egui_ctx);
         }
         app
     }
@@ -199,7 +213,7 @@ impl App {
     /// The copied/cut range on the active sheet, for the outline in the grid.
     pub(crate) fn clip_outline(&self) -> Option<Selection> {
         let clip = self.clip.as_ref()?;
-        (clip.sheet == self.active).then_some(clip.source)
+        (clip.doc == self.doc_id() && clip.sheet == self.active).then_some(clip.source)
     }
 
     /// Number of rows in the current view (visible rows when filtered).
@@ -326,12 +340,15 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_loading();
+        self.poll_parked_loads();
         self.poll_ai();
 
-        if ctx.input(|i| i.viewport().close_requested()) && self.book.dirty && !self.allow_close {
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.allow_close
+            && (0..self.docs.len()).any(|i| self.doc_needs_saving(i))
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.commit_edit((0, 0));
-            self.pending = Some(Pending::Close);
+            self.request_quit(&ctx);
         }
         // Files dropped on the window or opened from Finder.
         let dropped = ctx.input(|i| {
@@ -344,20 +361,25 @@ impl eframe::App for App {
         });
         let mut incoming = crate::platform::take_opened_files();
         incoming.extend(dropped);
-        if let Some(path) = incoming.first().cloned() {
-            if incoming.len() > 1 {
-                self.notify("LiteSheet opens one workbook at a time; opening the first");
-            }
-            if self.loading.is_none() {
-                self.request(Pending::OpenFile(path), &ctx);
-            }
+        for path in incoming {
+            self.open_path(path, &ctx);
         }
 
-        if self.pending.is_none() && self.loading.is_none() {
-            self.shortcuts(&ctx);
+        if self.pending.is_none() {
+            self.doc_shortcuts(&ctx);
+            if self.loading.is_none() {
+                self.shortcuts(&ctx);
+            }
         }
 
         egui::Panel::top("menu").show(ui, |ui| self.menu_bar(ui));
+        if self.docs.len() > 1 {
+            egui::Panel::top("doc_tabs").show(ui, |ui| {
+                ui.add_space(3.0);
+                self.doc_tabs(ui);
+                ui.add_space(3.0);
+            });
+        }
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(3.0);
             self.toolbar(ui);

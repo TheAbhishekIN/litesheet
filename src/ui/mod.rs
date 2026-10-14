@@ -8,6 +8,7 @@ mod app;
 mod chart;
 mod chart_layer;
 pub(crate) mod commands;
+mod documents;
 mod editing;
 mod files;
 mod filtering;

@@ -2,21 +2,36 @@
 
 use egui::{Context, Id, Key, KeyboardShortcut, Modifiers};
 
-use super::app::{App, BAR_EDITOR_ID, CELL_EDITOR_ID, Pending};
+use super::app::{App, BAR_EDITOR_ID, CELL_EDITOR_ID};
 use super::selection::Selection;
 
 impl App {
+    /// Shortcuts that work even while the active workbook is loading.
+    pub(crate) fn doc_shortcuts(&mut self, ctx: &Context) {
+        let sc = |m, k| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)));
+        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        if sc(Modifiers::COMMAND, Key::N) {
+            self.new_doc();
+        }
+        if sc(Modifiers::COMMAND, Key::O) {
+            self.open_dialog(ctx);
+        }
+        if sc(Modifiers::COMMAND, Key::W) {
+            self.request_close_doc(ctx);
+        }
+        let n = self.docs.len();
+        if sc(Modifiers::CTRL | Modifiers::SHIFT, Key::Tab) || sc(cmd_shift, Key::OpenBracket) {
+            self.switch_doc((self.current + n - 1) % n);
+        } else if sc(Modifiers::CTRL, Key::Tab) || sc(cmd_shift, Key::CloseBracket) {
+            self.switch_doc((self.current + 1) % n);
+        }
+    }
+
     pub(crate) fn shortcuts(&mut self, ctx: &Context) {
         let cmd = Modifiers::COMMAND;
         let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
         let sc = |m, k| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)));
 
-        if sc(cmd, Key::N) {
-            self.request(Pending::New, ctx);
-        }
-        if sc(cmd, Key::O) {
-            self.request(Pending::Open, ctx);
-        }
         if sc(cmd_shift, Key::S) {
             self.save(true);
         }

@@ -160,7 +160,7 @@ impl App {
         let content = vec2(row_header_w + x, HEADER_H + n_view_rows as f32 * ROW_H);
 
         let mut scroll = egui::ScrollArea::both()
-            .id_salt(("grid", self.active))
+            .id_salt(("grid", self.doc_id(), self.active))
             .auto_shrink(false)
             .scroll_source(
                 egui::scroll_area::ScrollSource::MOUSE_WHEEL

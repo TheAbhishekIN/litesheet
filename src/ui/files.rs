@@ -1,7 +1,7 @@
 //! Opening, saving and exporting files, plus the unsaved-changes dialog.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -38,36 +38,69 @@ impl Loading {
     }
 }
 
+impl Loading {
+    /// The result, once the background thread has finished.
+    pub(crate) fn poll(&self) -> Option<Result<Book, String>> {
+        match self.rx.try_recv() {
+            Ok(r) => Some(r),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                Some(Err(format!("Couldn't open {}", file_name(&self.path))))
+            }
+        }
+    }
+}
+
 impl App {
-    pub(crate) fn request(&mut self, action: Pending, ctx: &Context) {
+    pub(crate) fn open_dialog(&mut self, ctx: &Context) {
         self.commit_edit((0, 0));
-        if self.book.dirty {
-            self.pending = Some(action);
-        } else {
-            self.perform(action, ctx);
+        if let Some(paths) = rfd::FileDialog::new()
+            .add_filter(
+                "Spreadsheets",
+                &["xlsx", "xlsm", "xls", "ods", "csv", "tsv"],
+            )
+            .add_filter("All files", &["*"])
+            .pick_files()
+        {
+            for path in paths {
+                self.open_path(path, ctx);
+            }
         }
     }
 
-    pub(crate) fn perform(&mut self, action: Pending, ctx: &Context) {
-        match action {
-            Pending::New => self.set_book(Book::new_blank()),
-            Pending::Open => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter(
-                        "Spreadsheets",
-                        &["xlsx", "xlsm", "xls", "ods", "csv", "tsv"],
-                    )
-                    .add_filter("All files", &["*"])
-                    .pick_file()
-                {
-                    self.start_load(path, ctx);
-                }
+    /// Close the active workbook, asking first if it has unsaved changes.
+    pub(crate) fn request_close_doc(&mut self, _ctx: &Context) {
+        self.commit_edit((0, 0));
+        if self.book.dirty {
+            self.pending = Some(Pending::CloseDoc);
+        } else {
+            self.close_doc();
+        }
+    }
+
+    /// Quit, walking through each workbook with unsaved changes first.
+    pub(crate) fn request_quit(&mut self, ctx: &Context) {
+        self.commit_edit((0, 0));
+        let unsaved = std::iter::once(self.current)
+            .chain(0..self.docs.len())
+            .find(|&i| self.doc_needs_saving(i));
+        match unsaved {
+            Some(i) => {
+                self.switch_doc(i);
+                self.pending = Some(Pending::Quit);
             }
-            Pending::OpenFile(path) => self.start_load(path, ctx),
-            Pending::Close => {
+            None => {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+    }
+
+    /// After a save or "Don't Save", carry on with what the dialog was for.
+    fn resume(&mut self, action: Pending, ctx: &Context) {
+        match action {
+            Pending::CloseDoc => self.close_doc(),
+            Pending::Quit => self.request_quit(ctx),
         }
     }
 
@@ -96,27 +129,34 @@ impl App {
     }
 
     pub(crate) fn poll_loading(&mut self) {
-        let Some(loading) = &self.loading else {
+        let Some(result) = self.loading.as_ref().and_then(Loading::poll) else {
             return;
         };
-        match loading.rx.try_recv() {
-            Ok(Ok(book)) => {
+        let Some(loading) = self.loading.take() else {
+            return;
+        };
+        match result {
+            Ok(book) => {
                 let name = file_name(&loading.path);
                 let secs = loading.started.elapsed().as_secs_f32();
                 let cells: usize = book.sheets.iter().map(|s| s.cells.len()).sum();
                 self.set_book(book);
-                self.loading = None;
                 self.notify(format!("Opened {name} ({cells} cells)"));
                 if std::env::var_os("LITESHEET_LOG").is_some() {
                     eprintln!("litesheet: opened {name} ({cells} cells) in {secs:.1}s");
                 }
             }
-            Ok(Err(e)) => {
-                self.loading = None;
+            Err(e) => {
                 self.error(e);
+                self.drop_empty_tab();
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            Err(_) => self.loading = None,
+        }
+    }
+
+    /// After a load fails or is cancelled, close the blank tab it was meant for.
+    fn drop_empty_tab(&mut self) {
+        if self.docs.len() > 1 && self.book.path.is_none() && !self.book.dirty {
+            self.close_doc();
         }
     }
 
@@ -163,6 +203,7 @@ impl App {
         if cancel {
             self.loading = None;
             self.notify(format!("Stopped opening {name}"));
+            self.drop_empty_tab();
         }
     }
 
@@ -225,7 +266,7 @@ impl App {
     }
 
     pub(crate) fn confirm_dialog(&mut self, ctx: &Context) {
-        let Some(pending) = self.pending.clone() else {
+        let Some(pending) = self.pending else {
             return;
         };
         let name = self
@@ -256,15 +297,19 @@ impl App {
             Some(0) => {
                 self.pending = None;
                 if self.save(false) {
-                    self.perform(pending, ctx);
+                    self.resume(pending, ctx);
                 }
             }
             Some(1) => {
                 self.pending = None;
-                self.book.dirty = false;
-                self.perform(pending, ctx);
+                let id = self.doc_id();
+                self.discarded.insert(id);
+                self.resume(pending, ctx);
             }
-            Some(2) => self.pending = None,
+            Some(2) => {
+                self.pending = None;
+                self.discarded.clear();
+            }
             _ => {}
         }
     }
