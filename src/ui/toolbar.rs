@@ -255,7 +255,7 @@ impl App {
         .clicked()
         {
             if self.show_search {
-                self.show_search = false;
+                self.close_search();
             } else {
                 self.commit_edit((0, 0));
                 self.show_search = true;
@@ -293,7 +293,7 @@ impl App {
         let filtered = self.view().has_filters();
         if filtered
             && ui
-                .button(RichText::new("✕ Clear").small())
+                .button(RichText::new("🗙 Clear").small())
                 .on_hover_text("Clear all filters")
                 .clicked()
         {

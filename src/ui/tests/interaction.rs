@@ -552,6 +552,12 @@ fn toolbar_data_actions() {
     h.get_by_label("Find").click();
     h.run_steps(2);
     assert!(h.state().show_search);
+    type_text(&mut h, "Gadget");
+    assert!(!h.state().view().matches.is_empty());
+    // Closing it from the toolbar clears the highlights too.
+    h.get_by_label("Find").click();
+    h.run_steps(2);
+    assert!(!h.state().show_search && h.state().view().matches.is_empty());
     // (The menu bar has an "AI" menu too; the toolbar button comes second.)
     h.query_all_by_label("AI").nth(1).unwrap().click();
     h.run_steps(2);
