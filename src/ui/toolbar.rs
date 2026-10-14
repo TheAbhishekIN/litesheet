@@ -6,7 +6,8 @@ use egui::{Color32, Pos2, Rect, Response, RichText, Sense, Stroke, Ui, Vec2, pos
 
 use super::app::App;
 use super::commands::BorderKind;
-use crate::model::{Borders, Currency, HAlign, NumFmt, PALETTE, Rgb};
+use crate::model::filter::column_label;
+use crate::model::{Borders, Currency, Freeze, HAlign, NumFmt, PALETTE, Rgb, refs};
 
 const BUTTON: Vec2 = vec2(28.0, 24.0);
 
@@ -216,6 +217,117 @@ impl App {
             {
                 self.adjust_decimals(1);
             }
+
+            // Everyday data actions, on the right.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.data_actions(ui);
+            });
+        });
+    }
+
+    /// Sort, filter, freeze, find and AI: the actions people reach for most,
+    /// one click away instead of inside the menus. Laid out right to left.
+    fn data_actions(&mut self, ui: &mut Ui) {
+        // Drop the labels when the window is too narrow for them.
+        let labels = ui.available_width() > 430.0;
+        let text = |t: &'static str| if labels { t } else { "" };
+
+        if labeled_button(
+            ui,
+            text("AI"),
+            "AI Assistant (⌘⇧I)",
+            self.ai.open,
+            paint_sparkle,
+        )
+        .clicked()
+        {
+            self.ai.open = !self.ai.open;
+        }
+        separator(ui);
+
+        if labeled_button(
+            ui,
+            text("Find"),
+            "Find (⌘F)",
+            self.show_search,
+            paint_search,
+        )
+        .clicked()
+        {
+            if self.show_search {
+                self.show_search = false;
+            } else {
+                self.commit_edit((0, 0));
+                self.show_search = true;
+                self.focus_search = true;
+            }
+        }
+
+        let frozen = self.sheet().freeze;
+        let r = labeled_button(
+            ui,
+            text("Freeze"),
+            "Freeze panes",
+            frozen.is_active(),
+            paint_freeze,
+        );
+        egui::Popup::menu(&r).show(|ui| {
+            let cell = refs::cell_name(self.sel.cursor.0, self.sel.cursor.1);
+            if ui.button(format!("Freeze Panes at {cell}")).clicked() {
+                self.freeze_at_cursor();
+            }
+            if ui.button("Freeze Top Row").clicked() {
+                self.set_freeze(Freeze { rows: 1, cols: 0 });
+            }
+            if ui.button("Freeze First Column").clicked() {
+                self.set_freeze(Freeze { rows: 0, cols: 1 });
+            }
+            if ui
+                .add_enabled(frozen.is_active(), egui::Button::new("Unfreeze Panes"))
+                .clicked()
+            {
+                self.set_freeze(Freeze::default());
+            }
+        });
+
+        let filtered = self.view().has_filters();
+        if filtered
+            && ui
+                .button(RichText::new("✕ Clear").small())
+                .on_hover_text("Clear all filters")
+                .clicked()
+        {
+            self.clear_filters();
+        }
+        let on = self.filter_buttons || filtered;
+        if labeled_button(
+            ui,
+            text("Filter"),
+            "Filter buttons in the column headers (⌘⇧L)",
+            on,
+            paint_funnel,
+        )
+        .clicked()
+        {
+            self.filter_buttons = !self.filter_buttons;
+        }
+
+        let col = self.sel.cursor.1;
+        let r = labeled_button(
+            ui,
+            text("Sort"),
+            "Sort by the selected column",
+            false,
+            paint_sort,
+        );
+        egui::Popup::menu(&r).show(|ui| {
+            let label = column_label(self.sheet(), col, self.view().header_row);
+            if ui.button(format!("Sort A to Z by {label}")).clicked() {
+                self.sort_by(col, true);
+            }
+            if ui.button(format!("Sort Z to A by {label}")).clicked() {
+                self.sort_by(col, false);
+            }
         });
     }
 }
@@ -327,6 +439,120 @@ fn icon_button(
         visuals.fg_stroke.color,
     );
     resp
+}
+
+/// A toolbar button with a painted icon and, if `text` isn't empty, a label.
+fn labeled_button(
+    ui: &mut Ui,
+    text: &str,
+    tip: &str,
+    selected: bool,
+    paint: impl FnOnce(&egui::Painter, Rect, Color32),
+) -> Response {
+    if text.is_empty() {
+        return icon_button(ui, tip, selected, paint);
+    }
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let size = vec2(BUTTON.x + galley.size().x + 6.0, BUTTON.y);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, text));
+    let resp = resp.on_hover_text(tip);
+    let visuals = ui.style().interact_selectable(&resp, selected);
+    if selected || resp.hovered() {
+        ui.painter().rect_filled(rect, 4.0, visuals.weak_bg_fill);
+    }
+    let icon = Rect::from_min_size(rect.min, BUTTON).shrink2(vec2(7.0, 6.0));
+    let color = visuals.fg_stroke.color;
+    paint(ui.painter(), icon, color);
+    let pos = pos2(
+        rect.left() + BUTTON.x - 3.0,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    ui.painter().galley(pos, galley, color);
+    resp
+}
+
+fn paint_sort(p: &egui::Painter, r: Rect, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    // Down arrow on the left, up arrow on the right.
+    let (x1, x2) = (r.left() + r.width() * 0.28, r.left() + r.width() * 0.72);
+    p.line_segment([pos2(x1, r.top()), pos2(x1, r.bottom())], stroke);
+    p.line_segment(
+        [pos2(x1 - 3.0, r.bottom() - 3.0), pos2(x1, r.bottom())],
+        stroke,
+    );
+    p.line_segment(
+        [pos2(x1 + 3.0, r.bottom() - 3.0), pos2(x1, r.bottom())],
+        stroke,
+    );
+    p.line_segment([pos2(x2, r.top()), pos2(x2, r.bottom())], stroke);
+    p.line_segment([pos2(x2 - 3.0, r.top() + 3.0), pos2(x2, r.top())], stroke);
+    p.line_segment([pos2(x2 + 3.0, r.top() + 3.0), pos2(x2, r.top())], stroke);
+}
+
+fn paint_funnel(p: &egui::Painter, r: Rect, color: Color32) {
+    // A wide cone over a narrow stem (each shape convex).
+    let c = r.center().x;
+    let neck = r.top() + r.height() * 0.55;
+    let cone = vec![
+        pos2(r.left(), r.top()),
+        pos2(r.right(), r.top()),
+        pos2(c + 1.75, neck),
+        pos2(c - 1.75, neck),
+    ];
+    p.add(egui::Shape::convex_polygon(cone, color, Stroke::NONE));
+    let stem = Rect::from_min_max(pos2(c - 1.75, neck - 0.5), pos2(c + 1.75, r.bottom()));
+    p.rect_filled(stem, 0.0, color);
+}
+
+fn paint_freeze(p: &egui::Painter, r: Rect, color: Color32) {
+    // A grid whose first row and column are drawn heavy.
+    let faint = Stroke::new(1.0, color.gamma_multiply(0.45));
+    let strong = Stroke::new(2.0, color);
+    p.rect_stroke(r, 1.0, faint, egui::StrokeKind::Inside);
+    let (x, y) = (r.left() + r.width() * 0.38, r.top() + r.height() * 0.38);
+    p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], strong);
+    p.line_segment([pos2(r.left(), y), pos2(r.right(), y)], strong);
+}
+
+fn paint_search(p: &egui::Painter, r: Rect, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    let radius = r.height() * 0.36;
+    let c = pos2(r.left() + radius + 1.0, r.top() + radius + 0.5);
+    p.circle_stroke(c, radius, stroke);
+    let d = radius * std::f32::consts::FRAC_1_SQRT_2;
+    p.line_segment(
+        [pos2(c.x + d, c.y + d), pos2(r.right() - 1.0, r.bottom())],
+        Stroke::new(2.0, color),
+    );
+}
+
+fn paint_sparkle(p: &egui::Painter, r: Rect, color: Color32) {
+    // A four-pointed star (four kites around the centre) with a small one beside it.
+    let star = |c: Pos2, size: f32| {
+        let w = size * 0.3;
+        let tips = [
+            vec2(0.0, -1.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 1.0),
+            vec2(-1.0, 0.0),
+        ];
+        for t in tips {
+            let side = vec2(-t.y, t.x);
+            let kite = vec![c, c + (t + side) * w, c + t * size, c + (t - side) * w];
+            p.add(egui::Shape::convex_polygon(kite, color, Stroke::NONE));
+        }
+    };
+    star(
+        pos2(r.left() + r.width() * 0.42, r.center().y + 1.0),
+        r.height() * 0.55,
+    );
+    star(pos2(r.right() - 1.5, r.top() + 1.5), 3.0);
 }
 
 fn paint_align(p: &egui::Painter, r: Rect, color: Color32, align: HAlign) {

@@ -527,3 +527,34 @@ fn loading_screen_and_cancel() {
     // The workbook that was open before is still there.
     assert_eq!(display(&h, 1, 2), "West");
 }
+
+#[test]
+fn toolbar_data_actions() {
+    let mut h = harness(SALES_CSV);
+    // Filter: one click shows the header buttons.
+    h.get_by_label("Filter").click();
+    h.run_steps(2);
+    assert!(h.state().filter_buttons);
+    // Sort: a menu for the selected column.
+    click(&mut h, cell(1, 4), Modifiers::NONE);
+    h.get_by_label("Sort").click();
+    h.run_steps(2);
+    h.get_by_label_contains("Sort Z to A by").click();
+    h.run_steps(2);
+    assert_eq!(display(&h, 1, 4), "40");
+    // Freeze: a menu.
+    h.get_by_label("Freeze").click();
+    h.run_steps(2);
+    h.get_by_label("Freeze Top Row").click();
+    h.run_steps(2);
+    assert_eq!(h.state().sheet().freeze.rows, 1);
+    // Find and AI toggle their panels.
+    h.get_by_label("Find").click();
+    h.run_steps(2);
+    assert!(h.state().show_search);
+    // (The menu bar has an "AI" menu too; the toolbar button comes second.)
+    h.query_all_by_label("AI").nth(1).unwrap().click();
+    h.run_steps(2);
+    assert!(h.state().ai.open);
+    shot(&mut h, "toolbar-actions");
+}
