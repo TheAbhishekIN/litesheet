@@ -1081,9 +1081,7 @@ impl App {
             }
         }
         if ui.button("Explain with AI").clicked() {
-            self.ai.open = true;
-            self.ai.task = crate::ai::Task::Explain;
-            self.ai.focus_prompt = true;
+            self.ai_quick(crate::ai::Task::Explain, ui.ctx());
             ui.close();
         }
     }

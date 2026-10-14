@@ -13,6 +13,7 @@ pub use client::spawn;
 pub use keychain::{delete_key, load_key, store_key};
 pub use settings::AiSettings;
 
+/// Shortcuts in the AI menu and the chat's empty state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Task {
     Formula,
@@ -22,65 +23,109 @@ pub enum Task {
 }
 
 impl Task {
-    pub const ALL: [Task; 4] = [Task::Formula, Task::Explain, Task::Filter, Task::Summarize];
+    pub const ALL: [Task; 4] = [Task::Summarize, Task::Explain, Task::Formula, Task::Filter];
+}
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Task::Formula => "Formula",
-            Task::Explain => "Explain",
-            Task::Filter => "Filter",
-            Task::Summarize => "Summarize",
-        }
-    }
+const SYSTEM_PROMPT: &str = "You are the AI assistant built into LiteSheet, a spreadsheet app. \
+You help the user understand, analyse and work with the spreadsheet they have open. Every \
+request comes with a fresh snapshot of the active sheet (columns, sample rows, the selection); \
+base your answers on it and say so when the snapshot doesn't contain what you need instead of \
+guessing.
 
-    pub fn placeholder(self) -> &'static str {
-        match self {
-            Task::Formula => "e.g. total of Price where Region is \"West\"",
-            Task::Explain => "Optional: what do you want to know about the selection?",
-            Task::Filter => "e.g. orders over 500 from 2024 that aren't shipped",
-            Task::Summarize => "Optional: anything to focus on?",
-        }
-    }
+Write concise plain text: short paragraphs, '-' bullet lists and **bold** are fine; no tables \
+and no headings.
 
-    fn system_prompt(self) -> &'static str {
-        match self {
-            Task::Formula => {
-                "You write Microsoft Excel formulas. Reply with exactly one formula that starts \
-                 with '=' and nothing else: no explanation, no code fences. Use A1 references \
-                 that match the sheet layout you are given. Prefer widely supported functions."
-            }
-            Task::Explain => {
-                "You are a concise data analyst. Explain the spreadsheet data you are given in \
-                 plain language: what it represents, notable patterns, outliers, and anything \
-                 that looks wrong. Use short paragraphs or bullet points. Plain text, no tables."
-            }
-            Task::Filter => {
-                "You convert natural-language filter requests into JSON for a spreadsheet. \
-                 Reply with only a JSON object of the form \
-                 {\"filters\":[{\"column\":\"<column letter>\",\"op\":\"<op>\",\"value\":\"<text>\"}]}. \
-                 Valid ops: eq, neq, contains, not_contains, starts_with, ends_with, gt, gte, lt, \
-                 lte, empty, not_empty. All filters are combined with AND. Several filters may \
-                 target the same column (e.g. a range uses gte and lte). Dates are written as \
-                 YYYY-MM-DD. Text comparisons are case-insensitive. No commentary."
-            }
-            Task::Summarize => {
-                "You are a concise data analyst. Summarize this spreadsheet for a busy reader: \
-                 what it contains, key figures and totals, trends, and notable outliers. Start \
-                 with a one-sentence overview, then up to 8 bullet points. Plain text."
-            }
-        }
-    }
+When the user wants a formula, put exactly one Excel formula that starts with '=' on its own in a \
+fenced code block tagged formula, for example:
+```formula
+=SUMIF(C2:C9,\"West\",F2:F9)
+```
+Use A1 references that match the sheet layout and widely supported functions. The app offers to \
+insert it into the cell the user has selected.
+
+When the user wants to see only some rows, add a fenced code block tagged filter containing JSON: \
+{\"filters\":[{\"column\":\"<column letter>\",\"op\":\"<op>\",\"value\":\"<text>\"}]}. Valid ops: eq, \
+neq, contains, not_contains, starts_with, ends_with, gt, gte, lt, lte, empty, not_empty. Filters \
+are combined with AND; several may target the same column (a range uses gte and lte). Dates are \
+written YYYY-MM-DD; text comparisons are case-insensitive. The app offers to apply it.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    User,
+    Assistant,
+}
+
+#[derive(Clone, Debug)]
+pub struct Message {
+    pub role: Role,
+    pub text: String,
 }
 
 pub struct Request {
-    pub task: Task,
-    pub prompt: String,
+    /// The conversation so far, ending with the user's new message.
+    pub history: Vec<Message>,
+    /// A snapshot of the spreadsheet, sent fresh with every request.
     pub context: String,
+    /// Identifies the request, so a stopped one's late answer can be ignored.
+    pub id: u64,
 }
 
 pub struct Response {
-    pub task: Task,
+    pub id: u64,
     pub result: Result<String, String>,
+}
+
+/// A piece of an assistant reply, as the chat shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Part {
+    Text(String),
+    /// A formula the user can insert into a cell.
+    Formula(String),
+    /// Column filters the user can apply.
+    Filter(Vec<FilterItem>),
+    /// Any other code block.
+    Code(String),
+}
+
+/// Split a reply into text, formulas, filters and code blocks.
+pub fn parse_reply(reply: &str) -> Vec<Part> {
+    let mut parts = Vec::new();
+    let mut rest = reply;
+    while let Some(start) = rest.find("```") {
+        push_text(&mut parts, &rest[..start]);
+        let after = &rest[start + 3..];
+        let (tag, body) = after.split_once('\n').unwrap_or(("", after));
+        let (body, next) = match body.find("```") {
+            Some(end) => (&body[..end], &body[end + 3..]),
+            None => (body, ""),
+        };
+        let tag = tag.trim().to_ascii_lowercase();
+        let body = body.trim();
+        let part = if tag == "filter" || (body.starts_with('{') && body.contains("\"filters\"")) {
+            match parse_filters(body) {
+                Ok(f) if !f.is_empty() => Part::Filter(f),
+                _ => Part::Code(body.to_string()),
+            }
+        } else if let Some(f) = (tag == "formula" || tag == "excel" || body.starts_with('='))
+            .then(|| extract_formula(body))
+            .flatten()
+        {
+            Part::Formula(f)
+        } else {
+            Part::Code(body.to_string())
+        };
+        parts.push(part);
+        rest = next;
+    }
+    push_text(&mut parts, rest);
+    parts
+}
+
+fn push_text(parts: &mut Vec<Part>, text: &str) {
+    let text = text.trim();
+    if !text.is_empty() {
+        parts.push(Part::Text(text.to_string()));
+    }
 }
 
 fn strip_fences(s: &str) -> &str {
@@ -106,7 +151,7 @@ struct FilterReply {
     filters: Vec<FilterItem>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct FilterItem {
     pub column: String,
     #[serde(flatten)]
@@ -141,5 +186,22 @@ mod tests {
         assert_eq!(f.len(), 2);
         assert_eq!(f[0].condition.op, Op::Gte);
         assert_eq!(f[1].column, "Status");
+    }
+
+    #[test]
+    fn replies_split_into_parts() {
+        let parts = parse_reply(
+            "Sure:\n```formula\n=SUM(B2:B9)\n```\nThen filter:\n```filter\n{\"filters\":[{\"column\":\"C\",\"op\":\"eq\",\"value\":\"West\"}]}\n```\n```\nnot a formula\n```",
+        );
+        assert_eq!(parts.len(), 5, "{parts:?}");
+        assert_eq!(parts[0], Part::Text("Sure:".into()));
+        assert_eq!(parts[1], Part::Formula("=SUM(B2:B9)".into()));
+        assert_eq!(parts[2], Part::Text("Then filter:".into()));
+        assert!(matches!(&parts[3], Part::Filter(f) if f[0].column == "C"));
+        assert_eq!(parts[4], Part::Code("not a formula".into()));
+        assert_eq!(
+            parse_reply("Just text."),
+            vec![Part::Text("Just text.".into())]
+        );
     }
 }

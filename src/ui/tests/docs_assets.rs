@@ -12,7 +12,6 @@ use egui_kittest::kittest::Queryable;
 use image::{Rgba, RgbaImage};
 
 use super::{mock_ai_server, wait_for_ai};
-use crate::ai::Task;
 use crate::model::filter::{ColumnFilter, Condition, Op};
 use crate::model::{Book, Cell, NumFmt, Style, interpret_input};
 use crate::ui::Selection;
@@ -358,56 +357,62 @@ fn formatting() {
     save(&mut h, "formatting");
 }
 
-fn ai_harness(theme: Theme, task: Task, prompt: &str) -> Harness<'static, App> {
+fn ai_harness(theme: Theme) -> Harness<'static, App> {
     let (url, _) = mock_ai_server(|body| {
-        Some(if body.contains("natural-language filter") {
-            r#"{"filters":[{"column":"Region","op":"eq","value":"West"},{"column":"Total","op":"gt","value":"300"}]}"#.into()
-        } else if body.contains("Excel formulas") {
-            "=SUMIFS(H2:H49,C2:C49,\"West\",I2:I49,\"Shipped\")".into()
+        let asked = super::ai::last_user_message(body);
+        Some(if asked.contains("over $300") {
+            "Here are the West region orders with a total over $300:\n\
+             ```filter\n\
+             {\"filters\":[{\"column\":\"Region\",\"op\":\"eq\",\"value\":\"West\"},{\"column\":\"Total\",\"op\":\"gt\",\"value\":\"300\"}]}\n\
+             ```"
+                .into()
+        } else if asked.contains("Total revenue") {
+            "This adds up the **Total** column for rows where Region is West and Status is \
+             Shipped:\n```formula\n=SUMIFS(H2:H49,C2:C49,\"West\",I2:I49,\"Shipped\")\n```"
+                .into()
         } else {
-            "This sheet lists 48 product orders placed between January and December 2024, \
+            "This sheet lists **48 product orders** placed between January and December 2024, \
              with the units, unit price and order total for each.\n\n\
-             • Orders are spread across four regions and five sales reps.\n\
-             • Most orders have shipped; the rest are pending or were returned.\n\
-             • Order totals vary widely, from under $20 to several thousand dollars.\n\
-             • Gadget has the highest unit price, so its orders are among the largest.\n\
-             • Every row has a value in every column."
+             - Orders are spread across four regions and five sales reps.\n\
+             - Most orders have shipped; the rest are pending or were returned.\n\
+             - Order totals vary widely, from under $20 to several thousand dollars.\n\
+             - Gadget has the highest unit price, so its orders are among the largest."
                 .into()
         })
     });
     let mut h = docs_harness(theme);
     h.state_mut().ai.use_test_backend(&url);
     h.state_mut().ai.open = true;
-    h.state_mut().ai.task = task;
-    h.state_mut().ai.prompt = prompt.to_string();
     h.run_steps(2);
     h
 }
 
+fn ask(h: &mut Harness<'static, App>, prompt: &str) {
+    h.state_mut().ai.prompt = prompt.to_string();
+    h.run_steps(2);
+    h.get_by_label("Send").click();
+    wait_for_ai(h);
+}
+
 fn ai_formula() {
-    let mut h = ai_harness(
-        Theme::Dark,
-        Task::Formula,
-        "Total revenue from shipped West region orders",
-    );
+    let mut h = ai_harness(Theme::Dark);
     h.state_mut().sel = Selection::single((1, 10));
     h.run_steps(2);
-    h.get_by_label("Generate").click();
-    wait_for_ai(&mut h);
+    ask(&mut h, "Total revenue from shipped West region orders");
     h.get_by_label("Insert into K2").click();
     save(&mut h, "ai-formula");
 }
 
 fn ai_filter() {
-    let mut h = ai_harness(Theme::Dark, Task::Filter, "West region orders over $300");
-    h.get_by_label("Apply Filter").click();
-    wait_for_ai(&mut h);
+    let mut h = ai_harness(Theme::Dark);
+    ask(&mut h, "Show West region orders over $300");
+    h.get_by_label("Apply filter").click();
     save(&mut h, "ai-filter");
 }
 
 fn ai_summary() {
-    let mut h = ai_harness(Theme::Light, Task::Summarize, "");
-    h.get_by_label("Summarize Sheet").click();
+    let mut h = ai_harness(Theme::Light);
+    h.get_by_label_contains("Summarize this sheet").click();
     wait_for_ai(&mut h);
     save(&mut h, "ai-summary");
 }
