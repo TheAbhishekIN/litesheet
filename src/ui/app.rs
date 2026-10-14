@@ -101,6 +101,7 @@ pub struct App {
     pub(crate) title: String,
     pub(crate) stats_cache: Option<((usize, Selection, u64), String)>,
 
+    pub(crate) updater: super::updates::Updater,
     pub ai: super::ai_panel::AiPanel,
     pub rt: tokio::runtime::Runtime,
     pub http: reqwest::Client,
@@ -148,6 +149,7 @@ impl App {
             clip: None,
             title: String::new(),
             stats_cache: None,
+            updater: super::updates::Updater::new(),
             ai: super::ai_panel::AiPanel::new(),
             rt,
             http: reqwest::Client::new(),
@@ -342,13 +344,15 @@ impl eframe::App for App {
         self.poll_loading();
         self.poll_parked_loads();
         self.poll_ai();
+        self.poll_updates(&ctx);
 
-        if ctx.input(|i| i.viewport().close_requested())
-            && !self.allow_close
-            && (0..self.docs.len()).any(|i| self.doc_needs_saving(i))
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.request_quit(&ctx);
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if !self.allow_close && (0..self.docs.len()).any(|i| self.doc_needs_saving(i)) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.request_quit(&ctx);
+            } else {
+                self.install_update_on_exit();
+            }
         }
         // Files dropped on the window or opened from Finder.
         let dropped = ctx.input(|i| {

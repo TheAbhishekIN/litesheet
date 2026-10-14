@@ -21,6 +21,7 @@ mod selection;
 mod sheet_tabs;
 mod status_bar;
 mod toolbar;
+mod updates;
 mod util;
 
 #[cfg(test)]

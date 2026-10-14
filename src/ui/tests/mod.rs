@@ -7,6 +7,7 @@ mod docs_assets;
 mod documents;
 mod interaction;
 mod perf;
+mod updates;
 
 use std::sync::{Arc, Mutex};
 
