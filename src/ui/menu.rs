@@ -217,9 +217,7 @@ impl App {
             ui.menu_button("AI", |ui| {
                 for task in ai::Task::ALL {
                     if ui.button(super::ai_panel::menu_label(task)).clicked() {
-                        self.ai.open = true;
-                        self.ai.task = task;
-                        self.ai.focus_prompt = true;
+                        self.ai_quick(task, &ctx);
                     }
                 }
                 ui.separator();

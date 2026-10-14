@@ -2,7 +2,10 @@
 
 use std::sync::mpsc::Sender;
 
-use super::{AiSettings, Request, Response};
+use super::{AiSettings, Request, Response, Role, SYSTEM_PROMPT};
+
+/// How many earlier messages go with each request.
+const MAX_HISTORY: usize = 20;
 
 /// Fire off a chat completion on the tokio runtime; the answer arrives on `tx`.
 pub fn spawn(
@@ -13,13 +16,12 @@ pub fn spawn(
     req: Request,
     tx: Sender<Response>,
     ctx: egui::Context,
-) {
+) -> tokio::task::JoinHandle<()> {
     rt.spawn(async move {
-        let task = req.task;
         let result = chat(&client, &settings, &key, &req).await;
-        let _ = tx.send(Response { task, result });
+        let _ = tx.send(Response { id: req.id, result });
         ctx.request_repaint();
-    });
+    })
 }
 
 async fn chat(
@@ -28,18 +30,26 @@ async fn chat(
     key: &str,
     req: &Request,
 ) -> Result<String, String> {
-    let user = if req.prompt.trim().is_empty() {
-        req.context.clone()
-    } else {
-        format!("{}\n\nRequest: {}", req.context, req.prompt.trim())
-    };
+    let mut messages = vec![
+        serde_json::json!({"role": "system", "content": SYSTEM_PROMPT}),
+        serde_json::json!({
+            "role": "system",
+            "content": format!("Snapshot of the user's spreadsheet:\n{}", req.context),
+        }),
+    ];
+    // Keep the conversation within a sensible size.
+    let skip = req.history.len().saturating_sub(MAX_HISTORY);
+    for m in &req.history[skip..] {
+        let role = match m.role {
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        };
+        messages.push(serde_json::json!({"role": role, "content": m.text}));
+    }
     let body = serde_json::json!({
         "model": settings.model,
         "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": req.task.system_prompt()},
-            {"role": "user", "content": user},
-        ],
+        "messages": messages,
     });
     let url = format!(
         "{}/chat/completions",
