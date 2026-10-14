@@ -23,10 +23,17 @@ pub fn is_csv(path: &Path) -> bool {
 }
 
 pub fn load(path: &Path) -> Result<Book> {
+    load_with_progress(path, &|_| {})
+}
+
+/// Like [`load`], reporting each step ("Reading sheet 2 of 3…")
+/// so a loading screen can show it.
+pub fn load_with_progress(path: &Path, progress: &dyn Fn(&str)) -> Result<Book> {
     let mut book = if is_csv(path) {
+        progress("Reading rows…");
         csv::load(path)?
     } else {
-        xlsx::load(path)?
+        xlsx::load(path, progress)?
     };
     book.path = Some(path.to_path_buf());
     book.dirty = false;

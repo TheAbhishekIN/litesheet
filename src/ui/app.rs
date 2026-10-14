@@ -86,7 +86,7 @@ pub struct App {
     pub(crate) status: Option<(String, Instant, bool)>,
     pub(crate) pending: Option<Pending>,
     pub(crate) allow_close: bool,
-    pub(crate) loading: Option<(PathBuf, Receiver<Result<Book, String>>)>,
+    pub(crate) loading: Option<super::files::Loading>,
     pub(crate) clip: Option<ClipData>,
     pub(crate) title: String,
     pub(crate) stats_cache: Option<((usize, Selection, u64), String)>,
@@ -385,21 +385,13 @@ impl eframe::App for App {
                 .size_range(260.0..=700.0)
                 .show(ui, |ui| self.ai_panel_ui(ui));
         }
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| {
-                if let Some((path, _)) = &self.loading {
-                    let name = file_name(path);
-                    ui.centered_and_justified(|ui| {
-                        ui.horizontal_centered(|ui| {
-                            ui.spinner();
-                            ui.label(format!("Opening {name}…"));
-                        });
-                    });
-                } else {
-                    self.grid_ui(ui);
-                }
-            });
+        if self.loading.is_some() {
+            egui::CentralPanel::default().show(ui, |ui| self.loading_ui(ui));
+        } else {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| self.grid_ui(ui));
+        }
 
         self.filter_window(&ctx);
         self.chart_window(&ctx);

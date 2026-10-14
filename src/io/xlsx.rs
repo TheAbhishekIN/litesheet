@@ -16,10 +16,39 @@ use crate::model::{
     Book, Cell, Chart, ChartKind, HAlign, NumFmt, Pos, Style, Value, fmt_number, parse_literal,
 };
 
+/// Every sheet's formulas, as `=…` text by position.
+fn read_formulas(path: &Path) -> HashMap<String, Vec<(Pos, String)>> {
+    let mut out = HashMap::new();
+    let Ok(mut wb) = open_workbook_auto(path) else {
+        return out;
+    };
+    for name in wb.sheet_names() {
+        let Ok(formulas) = wb.worksheet_formula(&name) else {
+            continue;
+        };
+        let (r0, c0) = formulas.start().unwrap_or((0, 0));
+        let list = formulas
+            .used_cells()
+            .filter(|(_, _, f)| !f.is_empty())
+            .map(|(r, c, f)| {
+                let raw = if f.starts_with('=') {
+                    f.clone()
+                } else {
+                    format!("={f}")
+                };
+                ((r0 + r as u32, c0 + c as u32), raw)
+            })
+            .collect();
+        out.insert(name, list);
+    }
+    out
+}
+
 /// Rough conversion between Excel character widths and our point widths.
 const PX_PER_CHAR: f32 = 7.5;
 
-pub(super) fn load(path: &Path) -> Result<Book> {
+pub(super) fn load(path: &Path, progress: &dyn Fn(&str)) -> Result<Book> {
+    progress("Reading the workbook…");
     let mut wb =
         open_workbook_auto(path).with_context(|| format!("Couldn't open {}", path.display()))?;
     // Styles, number formats and widths only exist for the OOXML formats.
@@ -30,38 +59,46 @@ pub(super) fn load(path: &Path) -> Result<Book> {
             .as_deref(),
         Some("xlsx" | "xlsm")
     );
-    let mut formatting = if is_ooxml {
-        xlsx_styles::read(path).unwrap_or_default()
-    } else {
-        HashMap::new()
-    };
+    let names = wb.sheet_names();
+    // Formatting and formulas each take a separate pass over the file, so
+    // they run on their own threads while this one reads the values.
+    let (mut formatting, mut formulas, values) = std::thread::scope(|scope| {
+        let formatting = is_ooxml.then(|| scope.spawn(|| xlsx_styles::read(path)));
+        let formulas = scope.spawn(|| read_formulas(path));
+        let mut values = Vec::new();
+        for (i, name) in names.iter().enumerate() {
+            progress(&if names.len() > 1 {
+                format!("Reading sheet {} of {}: {name}…", i + 1, names.len())
+            } else {
+                format!("Reading {name}…")
+            });
+            let mut cells: HashMap<Pos, Cell> = HashMap::new();
+            if let Ok(range) = wb.worksheet_range(name) {
+                let (r0, c0) = range.start().unwrap_or((0, 0));
+                let (h, w) = range.get_size();
+                cells.reserve((h * w).min(1 << 22));
+                for (r, c, data) in range.used_cells() {
+                    if let Some(cell) = cell_from_data(data) {
+                        cells.insert((r0 + r as u32, c0 + c as u32), cell);
+                    }
+                }
+            }
+            values.push(cells);
+        }
+        progress("Reading formulas and formatting…");
+        let formatting = formatting
+            .and_then(|h| h.join().ok())
+            .and_then(|r| r.ok())
+            .unwrap_or_default();
+        let formulas = formulas.join().unwrap_or_default();
+        (formatting, formulas, values)
+    });
     let mut widths = Vec::new();
     let mut sheets = Vec::new();
-    for name in wb.sheet_names() {
-        let mut cells: HashMap<Pos, Cell> = HashMap::new();
-        if let Ok(range) = wb.worksheet_range(&name) {
-            let (r0, c0) = range.start().unwrap_or((0, 0));
-            for (r, c, data) in range.used_cells() {
-                if let Some(cell) = cell_from_data(data) {
-                    cells.insert((r0 + r as u32, c0 + c as u32), cell);
-                }
-            }
-        }
-        if let Ok(formulas) = wb.worksheet_formula(&name) {
-            let (r0, c0) = formulas.start().unwrap_or((0, 0));
-            for (r, c, f) in formulas.used_cells() {
-                if f.is_empty() {
-                    continue;
-                }
-                let raw = if f.starts_with('=') {
-                    f.clone()
-                } else {
-                    format!("={f}")
-                };
-                let pos = (r0 + r as u32, c0 + c as u32);
-                let fmt = cells.get(&pos).map(|c| c.fmt).unwrap_or_default();
-                cells.insert(pos, Cell::with_fmt(raw, fmt));
-            }
+    for (name, mut cells) in names.into_iter().zip(values) {
+        for (pos, raw) in formulas.remove(&name).unwrap_or_default() {
+            let fmt = cells.get(&pos).map(|c| c.fmt).unwrap_or_default();
+            cells.insert(pos, Cell::with_fmt(raw, fmt));
         }
         if let Some(f) = formatting.remove(&name) {
             for (pos, fmt, style) in f.cells {
@@ -86,6 +123,7 @@ pub(super) fn load(path: &Path) -> Result<Book> {
     if sheets.is_empty() {
         return Err(anyhow!("The workbook has no sheets"));
     }
+    progress("Calculating formulas…");
     let mut book = Book::from_sheets(sheets);
     for (sheet, (widths, merges, freeze, charts)) in book.sheets.iter_mut().zip(widths) {
         sheet.charts = charts;

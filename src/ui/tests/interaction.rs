@@ -508,3 +508,21 @@ fn files_opened_from_finder_respect_unsaved_changes() {
     assert_eq!(display(&h, 1, 1), "1200");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn loading_screen_and_cancel() {
+    let mut h = harness(SALES_CSV);
+    let path = std::path::PathBuf::from("/tmp/IPC_Master_Export.xlsx");
+    let (loading, _tx) = crate::ui::files::Loading::stalled(path);
+    h.state_mut().loading = Some(loading);
+    h.run_steps(2);
+    h.get_by_label("Opening IPC_Master_Export.xlsx");
+    h.get_by_label("Reading sheet 1 of 2: Data…");
+    h.get_by_label("9.1 MB");
+    shot(&mut h, "loading");
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert!(h.state().loading.is_none());
+    // The workbook that was open before is still there.
+    assert_eq!(display(&h, 1, 2), "West");
+}

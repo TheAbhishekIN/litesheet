@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use chrono::Timelike;
 use formualizer::LiteralValue;
+use formualizer::eval::arrow_store::IngestBuilder;
 use formualizer::workbook::{Workbook as Engine, WorkbookConfig};
 
 use super::format::date_to_serial;
@@ -68,6 +69,8 @@ pub struct Book {
 }
 
 const MAX_UNDO: usize = 200;
+/// Sheets up to this many cells (rows × columns of the used range) load in bulk.
+const MAX_BULK_CELLS: u64 = 50_000_000;
 /// Excel's sheet size.
 pub const MAX_ROWS: u32 = 1_048_576;
 pub const MAX_COLS: u32 = 16_384;
@@ -102,14 +105,20 @@ impl Book {
         let mut book = Self::empty();
         for (name, cells) in sheets {
             let idx = book.add_sheet(&name);
-            if let (Some(r), Some(c)) = (
+            let (Some(r), Some(c)) = (
                 cells.iter().map(|x| x.0.0).max(),
                 cells.iter().map(|x| x.0.1).max(),
-            ) {
+            ) else {
+                continue;
+            };
+            if (r as u64 + 1) * (c as u64 + 1) <= MAX_BULK_CELLS {
+                book.bulk_load(idx, cells, (r + 1, c + 1));
+            } else {
+                // Very sparse: write cell by cell rather than building a huge dense grid.
                 book.reserve(idx, (r, c));
-            }
-            for (pos, cell) in cells {
-                book.write_cell(idx, pos, Some(cell));
+                for (pos, cell) in cells {
+                    book.write_cell(idx, pos, Some(cell));
+                }
             }
             book.sheets[idx].recompute_extent();
         }
@@ -118,6 +127,49 @@ impl Book {
         }
         book.recalc();
         book
+    }
+
+    /// Load a freshly added sheet's values into the engine in one columnar
+    /// pass (much faster than a write per cell), then add the formulas.
+    fn bulk_load(&mut self, sheet: usize, mut cells: Vec<(Pos, Cell)>, (rows, cols): (u32, u32)) {
+        cells.sort_unstable_by_key(|(pos, _)| *pos);
+        let Self { sheets, engine, .. } = self;
+        let s = &mut sheets[sheet];
+        s.cells.reserve(cells.len());
+        s.values.reserve(cells.len());
+        let name = s.name.clone();
+        let date_system = engine.engine().config.date_system;
+        let mut ingest = IngestBuilder::new(&name, cols as usize, 32 * 1024, date_system);
+        let mut row = vec![LiteralValue::Empty; cols as usize];
+        let mut formulas = Vec::new();
+        let mut cells = cells.into_iter().peekable();
+        for r in 0..rows {
+            row.fill(LiteralValue::Empty);
+            while let Some((pos, cell)) = cells.next_if(|(pos, _)| pos.0 == r) {
+                match store_cell(s, pos, cell) {
+                    Stored::Value(v) => row[pos.1 as usize] = to_literal(&v),
+                    Stored::Formula(raw) => formulas.push((pos, raw)),
+                    Stored::Empty => {}
+                }
+            }
+            if ingest.append_row(&row).is_err() {
+                break;
+            }
+        }
+        let arrow = ingest.finish();
+        let store = engine.engine_mut().sheet_store_mut();
+        match store.sheets.iter().position(|a| a.name.as_ref() == name) {
+            Some(i) => store.sheets[i] = arrow,
+            None => store.sheets.push(arrow),
+        }
+        for (pos, raw) in formulas {
+            if engine
+                .set_formula(&name, pos.0 + 1, pos.1 + 1, &raw)
+                .is_err()
+            {
+                s.values.insert(pos, Value::Error("#NAME?".into()));
+            }
+        }
     }
 
     pub fn add_sheet(&mut self, name: &str) -> usize {
@@ -691,39 +743,24 @@ impl Book {
         let (r, c) = (pos.0 + 1, pos.1 + 1);
         let Self { sheets, engine, .. } = self;
         let s = &mut sheets[sheet];
-        s.formulas.remove(&pos);
-        match cell {
-            None => {
-                s.cells.remove(&pos);
-                s.values.remove(&pos);
+        let Some(cell) = cell else {
+            s.formulas.remove(&pos);
+            s.cells.remove(&pos);
+            s.values.remove(&pos);
+            let _ = engine.set_value(&s.name, r, c, LiteralValue::Empty);
+            return;
+        };
+        match store_cell(s, pos, cell) {
+            Stored::Empty => {
                 let _ = engine.set_value(&s.name, r, c, LiteralValue::Empty);
             }
-            Some(cell) => {
-                if cell.raw.is_empty() {
-                    // Formatted but empty.
-                    s.values.remove(&pos);
-                    let _ = engine.set_value(&s.name, r, c, LiteralValue::Empty);
-                    s.cells.insert(pos, cell);
-                    return;
+            Stored::Formula(raw) => {
+                if engine.set_formula(&s.name, r, c, &raw).is_err() {
+                    s.values.insert(pos, Value::Error("#NAME?".into()));
                 }
-                if cell.is_formula() {
-                    s.formulas.insert(pos);
-                    s.values.insert(pos, Value::Empty);
-                    if engine.set_formula(&s.name, r, c, &cell.raw).is_err() {
-                        s.values.insert(pos, Value::Error("#NAME?".into()));
-                    }
-                } else {
-                    let v = if cell.fmt == NumFmt::Text {
-                        Value::Text(cell.raw.clone())
-                    } else {
-                        parse_literal(&cell.raw)
-                    };
-                    let _ = engine.set_value(&s.name, r, c, to_literal(&v));
-                    s.values.insert(pos, v);
-                }
-                s.n_rows = s.n_rows.max(pos.0 + 1);
-                s.n_cols = s.n_cols.max(pos.1 + 1);
-                s.cells.insert(pos, cell);
+            }
+            Stored::Value(v) => {
+                let _ = engine.set_value(&s.name, r, c, to_literal(&v));
             }
         }
     }
@@ -747,6 +784,41 @@ impl Book {
             }
         }
     }
+}
+
+/// What the engine needs to hear about a cell after [`store_cell`].
+enum Stored {
+    Empty,
+    Value(Value),
+    Formula(String),
+}
+
+/// Put a cell into the sheet model (cells, values, formulas, extent).
+fn store_cell(s: &mut Sheet, pos: Pos, cell: Cell) -> Stored {
+    s.formulas.remove(&pos);
+    if cell.raw.is_empty() {
+        // Formatted but empty.
+        s.values.remove(&pos);
+        s.cells.insert(pos, cell);
+        return Stored::Empty;
+    }
+    let stored = if cell.is_formula() {
+        s.formulas.insert(pos);
+        s.values.insert(pos, Value::Empty);
+        Stored::Formula(cell.raw.clone())
+    } else {
+        let v = if cell.fmt == NumFmt::Text {
+            Value::Text(cell.raw.clone())
+        } else {
+            parse_literal(&cell.raw)
+        };
+        s.values.insert(pos, v.clone());
+        Stored::Value(v)
+    };
+    s.n_rows = s.n_rows.max(pos.0 + 1);
+    s.n_cols = s.n_cols.max(pos.1 + 1);
+    s.cells.insert(pos, cell);
+    stored
 }
 
 fn to_literal(v: &Value) -> LiteralValue {
