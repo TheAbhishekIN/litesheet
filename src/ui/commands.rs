@@ -103,6 +103,7 @@ impl App {
             sheet: self.active,
             source: self.sel,
             cut,
+            doc: self.doc_id(),
         });
         self.notify(if cut {
             format!("Cut {n} cells")
@@ -135,7 +136,9 @@ impl App {
                     edits.push((self.active, (dest.0 + i as u32, dest.1 + j as u32), cell));
                 }
             }
-            cut_source = clip.cut.then_some((clip.sheet, clip.source));
+            // Cutting between workbooks leaves the source alone, like a copy.
+            cut_source =
+                (clip.cut && clip.doc == self.doc_id()).then_some((clip.sheet, clip.source));
             (clip.raws.len(), clip.raws.first().map_or(0, |r| r.len()))
         } else {
             let text = text.replace("\r\n", "\n");

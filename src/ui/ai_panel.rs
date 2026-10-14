@@ -24,7 +24,7 @@ pub struct AiPanel {
     busy: Option<Task>,
     result: Option<(Task, Result<String, String>)>,
     /// Where a generated formula will go.
-    formula_target: Option<(usize, (u32, u32))>,
+    formula_target: Option<(u64, usize, (u32, u32))>,
     applied_filters: Vec<String>,
     last_sent: Option<(usize, String)>,
 }
@@ -142,7 +142,7 @@ impl App {
         let context = self.ai_context(task);
         self.ai.last_sent = Some((context.len(), host_of(&self.ai.settings.base_url)));
         if task == Task::Formula {
-            self.ai.formula_target = Some((self.active, self.sel.cursor));
+            self.ai.formula_target = Some((self.doc_id(), self.active, self.sel.cursor));
         }
         self.ai.busy = Some(task);
         self.ai.result = None;
@@ -389,7 +389,8 @@ impl App {
                         self.ai.result = Some((task, Ok(f.clone())));
                     }
                     ui.horizontal(|ui| {
-                        if let Some((sheet, pos)) = self.ai.formula_target
+                        if let Some((doc, sheet, pos)) = self.ai.formula_target
+                            && doc == self.doc_id()
                             && sheet < self.book.sheets.len()
                         {
                             let label = format!("Insert into {}", refs::cell_name(pos.0, pos.1));
