@@ -4,6 +4,21 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-14
+
+### Added
+
+- Several workbooks open at once, in tabs. Opening a file (File → Open, Finder, drag and drop) adds a tab instead of replacing the workbook you're in. Open… can pick several files. ⌘W closes a tab, ⌃Tab / ⌃⇧Tab switch tabs, and copy and paste work between workbooks. Quitting asks about each workbook with unsaved changes
+- The AI panel is now a chat about your data, with follow-up questions, Stop, Retry and New chat. Replies with a formula get *Insert* and *Copy* buttons, and suggested filters get an *Apply filter* button. An empty chat offers quick starts
+- Automatic updates. LiteSheet checks for new versions, downloads them in the background, verifies the signature, and installs with *Restart to update* or the next time you quit. Help → Check for Updates… and Help → Install Updates Automatically
+- Sort, Filter, Freeze, Find and AI buttons on the right of the toolbar
+
+### Changed
+
+- Opening large files is about 3× faster. A 10 MB `.xlsx` with 2.1 million cells now opens in about 2 s instead of 6.6 s
+- The loading screen shows the file name and size, what's being read, the elapsed time and a Cancel button, instead of dim text on a black background
+
+
 ## [0.2.1] - 2026-10-13
 
 ### Changed
@@ -57,7 +72,8 @@ First public release.
 - BYOK AI: generate formulas, explain selections, filter in plain English and summarize sheets, with any OpenAI-compatible provider; the API key is stored in the macOS Keychain
 - macOS `.app` bundle script with an optional universal (Apple Silicon + Intel) build
 
-[Unreleased]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/TheAbhishekIN/litesheet/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/TheAbhishekIN/litesheet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/TheAbhishekIN/litesheet/releases/tag/v0.1.0

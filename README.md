@@ -24,7 +24,7 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 
 - **Small and fast.** A single ~25 MB native app. It opens a 200,000-row file in about 1.5 s and scrolls at well under a millisecond per frame.
 - **Compatible.** Opens and saves `.xlsx` and `.csv`, with 400+ Excel functions recalculated as you type.
-- **Private by default.** No accounts, telemetry or cloud. The only network requests are the AI requests you start, and they go straight to the provider you choose.
+- **Private by default.** No accounts, telemetry or cloud. The only network requests are the AI requests you start (straight to the provider you choose) and a check for new versions.
 
 ## Contents
 
@@ -47,7 +47,10 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - Save as `.xlsx` (all sheets) or `.csv` (current sheet), and export any sheet as CSV
 - Formulas, dates, percentages and column widths are kept when you save
 - Open files from Finder (double-click, *Open With*, or drop on the Dock icon), the File menu, by dragging onto the window, or from the command line
-- Unsaved-changes prompt when you create, open or quit; a `•` in the title bar marks unsaved changes
+- **Several workbooks at once**, each in its own tab with its own undo history; **⌘W** closes a tab, **⌃Tab** switches, and copy/paste works between them
+- Large files open quickly in the background, with a progress screen you can cancel (a 10 MB, 2-million-cell export opens in about 2 s)
+- Unsaved-changes prompt when you close a tab or quit; a `•` in the title bar and tab marks unsaved changes
+- **Automatic updates:** new versions download in the background and install with one click (*Restart to update*) or the next time you quit
 
 ### Grid and editing
 - Virtualized grid: only visible cells are drawn, so very large sheets stay smooth
@@ -99,10 +102,10 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 - They update as the data changes, follow inserted and deleted rows and columns, and are saved to `.xlsx` as native Excel charts (and Excel charts are read back)
 
 ### AI (Bring Your Own Key)
-- **Generate formulas** from plain English, written for the selected cell using your column headers
-- **Explain** a selected range: what it contains, patterns, outliers
-- **Filter in plain English**, turned into normal column filters you can inspect and edit
-- **Summarize** a sheet: an overview with key figures
+- **Chat about your data:** ask questions and follow-ups in a chat panel that sees the active sheet and your selection
+- **Formulas** from plain English, with an *Insert into F11* button for the cell you had selected
+- **Filters** in plain English, applied as normal column filters you can inspect and edit
+- **Explain** a selection or **summarize** a sheet in one click
 - Works with any OpenAI-compatible API, including local models through Ollama or LM Studio
 - The API key is stored in the macOS Keychain
 
@@ -113,8 +116,8 @@ Excel-compatible formulas, filtering and sorting, smooth scrolling through hundr
 | **Charts that update with your data**<br><img src="docs/screenshots/charts.png" alt="A column chart of revenue by region next to a summary table"> | **Formatting toolbar**<br><img src="docs/screenshots/formatting.png" alt="The fill colour palette open over currency-formatted columns in dark mode"> |
 | **Build formulas by pointing at cells**<br><img src="docs/screenshots/formula-editing.png" alt="Editing a SUMIF formula with the referenced range highlighted"> | **Several sheets, linked by formulas**<br><img src="docs/screenshots/multiple-sheets.png" alt="A summary sheet built with SUMIF and COUNTIF"> |
 | **Column filters**<br><img src="docs/screenshots/filtering.png" alt="The filter window for the Region column"> | **Find**<br><img src="docs/screenshots/search.png" alt="Search results highlighted in the grid"> |
-| **AI: generate a formula**<br><img src="docs/screenshots/ai-formula.png" alt="The AI panel generating a SUMIFS formula in dark mode"> | **AI: filter in plain English**<br><img src="docs/screenshots/ai-filter.png" alt="The AI panel turning a request into column filters"> |
-| **AI: summarize a sheet**<br><img src="docs/screenshots/ai-summary.png" alt="The AI panel summarizing the orders sheet"> | **Dark mode**<br><img src="docs/screenshots/overview-dark.png" alt="LiteSheet in dark mode"> |
+| **AI chat: write a formula**<br><img src="docs/screenshots/ai-formula.png" alt="The AI chat answering with a SUMIFS formula and an Insert button, in dark mode"> | **AI chat: filter in plain English**<br><img src="docs/screenshots/ai-filter.png" alt="The AI chat turning a request into column filters"> |
+| **AI chat: summarize a sheet**<br><img src="docs/screenshots/ai-summary.png" alt="The AI chat summarizing the orders sheet"> | **Dark mode**<br><img src="docs/screenshots/overview-dark.png" alt="LiteSheet in dark mode"> |
 
 > The screenshots are rendered from the real app by `scripts/generate-docs-assets.sh`. The AI screenshots use a stand-in for the AI provider, so their text is illustrative.
 
@@ -128,6 +131,7 @@ LiteSheet currently targets **macOS 11 or later** on Apple Silicon and Intel.
 
 1. Unzip it and drag **LiteSheet.app** into Applications.
 2. Open it. LiteSheet is signed with a Developer ID and notarized by Apple, so it opens like any other Mac app.
+3. From then on LiteSheet keeps itself up to date. When a new version is out, a green **Restart to update** button appears in the menu bar. Turn this off with *Help → Install Updates Automatically*.
 
 Older versions are on the [Releases page](https://github.com/TheAbhishekIN/litesheet/releases).
 
@@ -168,6 +172,7 @@ Try it on the bundled `samples/sales.xlsx`: a styled order list with a frozen he
 | Action | Shortcut |
 |---|---|
 | New / Open / Save / Save As | ⌘N / ⌘O / ⌘S / ⇧⌘S |
+| Close tab / next / previous tab | ⌘W / ⌃Tab / ⌃⇧Tab |
 | Undo / Redo | ⌘Z / ⇧⌘Z (or ⌘Y) |
 | Cut / Copy / Paste | ⌘X / ⌘C / ⌘V |
 | Edit cell | Return, F2 or double-click |
@@ -185,13 +190,13 @@ Try it on the bundled `samples/sales.xlsx`: a styled order list with a frozen he
 
 ### Sorting and filtering
 
-- **Sort:** use the **Data** menu, or right-click a column header. If several rows are selected, only those rows are sorted; otherwise every row below the header is.
-- **Filter:** press **⇧⌘L** to show a ⏷ button in each column header. Click one to set conditions, tick values, or both. Right-click a cell and choose *Filter by "value"* for a quick filter.
+- **Sort:** use **Sort** on the toolbar, the **Data** menu, or right-click a column header. If several rows are selected, only those rows are sorted; otherwise every row below the header is.
+- **Filter:** click **Filter** on the toolbar (or press **⇧⌘L**) to show a ⏷ button in each column header. Click one to set conditions, tick values, or both. Right-click a cell and choose *Filter by "value"* for a quick filter.
 - **Clear:** use **Clear filters** in the status bar, or *Data → Clear All Filters*. *Data → First row is a header* controls whether row 1 stays visible while filtering.
 
 ## AI (Bring Your Own Key)
 
-Open the AI panel with **⇧⌘I** and click **Settings**:
+Open the AI panel with **AI** on the toolbar (or **⇧⌘I**). The first time, add your provider in **⚙ Settings**:
 
 | Setting | Example |
 |---|---|
@@ -199,19 +204,24 @@ Open the AI panel with **⇧⌘I** and click **Settings**:
 | Model | `gpt-4o-mini`, or any model your provider serves |
 | API key | Saved to the macOS Keychain under the service `LiteSheet` |
 
-| Task | What is sent to the provider | What you get |
-|---|---|---|
-| Formula | Column names and types, the first 15 rows, the target cell | A formula to insert or copy |
-| Explain | The selected range (up to 200 × 30 cells) and the header row | A plain-language explanation |
-| Filter | Column names and up to 8 sample values per column | Column filters, applied immediately |
-| Summarize | Per-column statistics and the first 150 rows | A short overview with key figures |
+Then chat. **Return** sends and **Shift+Return** adds a new line. Use **Stop** to cancel a request and **New chat** to start over. An empty chat offers quick starts: summarize the sheet, explain the selection, write a formula, or filter rows.
 
-Press **⌘Return** in the prompt box to run a task. After each request, the panel shows how much data was sent and to which host.
+When a reply contains a formula, it comes with **Insert into F11** and **Copy** buttons. When it suggests filters, it comes with **Apply filter**.
+
+Each message sends a fresh snapshot of the active sheet:
+- column names with types and statistics
+- up to 8 sample values per column
+- the selection (up to 200 × 30 cells) and the active cell's formula
+- as many rows as fit in about 60 KB
+- the last 20 messages of the conversation
+
+Below the message box, the panel shows how much was sent and to which host.
 
 ## Privacy
 
-- No telemetry, analytics, crash reporting or update checks.
-- No network requests except the AI requests you start.
+- No telemetry, analytics or crash reporting.
+- The only network requests are the AI requests you start, and an update check: a request to `api.github.com` for the latest release, shortly after launch and every 6 hours. It sends nothing about you or your files. Set `LITESHEET_NO_UPDATE_CHECK=1` to turn it off.
+- Updates are only installed if they are signed by the LiteSheet developer's Apple Developer ID.
 - AI requests go directly from your Mac to the base URL you configure. Point it at a local model and nothing leaves your machine.
 - The API key is stored in the macOS Keychain, never in a plain-text file.
 - Settings (base URL and model) are stored in `~/Library/Application Support/LiteSheet/settings.json`.
@@ -241,6 +251,9 @@ LiteSheet is young. Things it doesn't do yet, roughly in priority order:
 - [x] Merged cells
 - [x] Freeze panes
 - [x] Charts
+- [x] Several workbooks open at once, in tabs
+- [x] Chat with AI about your data
+- [x] Automatic updates
 - [ ] Tested Linux and Windows builds
 
 Have an idea? [Open a feature request](https://github.com/TheAbhishekIN/litesheet/issues/new/choose).
