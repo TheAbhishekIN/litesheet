@@ -4,6 +4,8 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-15
+
 ### Added
 
 - AI provider presets for OpenAI, Anthropic (Claude), OpenRouter, Groq, Ollama and LM Studio, each with its base URL and a current default model (`gpt-6-luna` for OpenAI), plus any OpenAI-compatible API. Each provider keeps its own key in the Keychain
@@ -15,6 +17,7 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 - The AI chat failed with "temperature does not support 0.2" on models that only accept their default temperature. LiteSheet now sends no temperature unless you set one, and if a model rejects any option it drops that option and retries
 - The AI now sees every distinct value of columns with up to 50 of them, so questions like "what are the unique codes?" get a complete answer
 - Clearer errors for a bad key, an unknown model, rate limits and timeouts
+- Closing Find from the toolbar now clears the search highlights, and the toolbar's filter Clear button shows its icon
 
 ## [0.3.0] - 2026-10-14
 
@@ -84,7 +87,8 @@ First public release.
 - BYOK AI: generate formulas, explain selections, filter in plain English and summarize sheets, with any OpenAI-compatible provider; the API key is stored in the macOS Keychain
 - macOS `.app` bundle script with an optional universal (Apple Silicon + Intel) build
 
-[Unreleased]: https://github.com/TheAbhishekIN/litesheet/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/TheAbhishekIN/litesheet/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/TheAbhishekIN/litesheet/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/TheAbhishekIN/litesheet/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/TheAbhishekIN/litesheet/compare/v0.1.0...v0.2.0
