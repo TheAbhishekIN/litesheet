@@ -8,12 +8,17 @@ use tokio::task::JoinHandle;
 
 use super::app::App;
 use super::util::file_name;
-use crate::ai::{self, AiSettings, FilterItem, Message, Part, Role, Task};
+use std::collections::HashMap;
+use std::sync::mpsc::Receiver;
+
+use crate::ai::{self, AiSettings, Effort, FilterItem, Message, Part, Provider, Role, Task};
 use crate::model::filter::{ColumnFilter, column_label, resolve_column};
 use crate::model::refs;
 use crate::model::{Pos, Sheet, Value};
 
 const MAX_CONTEXT_CHARS: usize = 60_000;
+/// Columns with at most this many distinct values have all of them listed.
+const MAX_LISTED_VALUES: usize = 50;
 const PROMPT_ID: &str = "ai_prompt";
 
 /// A workbook (document id), sheet and cell.
@@ -70,8 +75,12 @@ pub struct AiPanel {
     pub chat: Vec<ChatMsg>,
     settings: AiSettings,
     key_input: String,
-    /// `None` until we've looked in the Keychain.
-    key: Option<Option<String>>,
+    /// Keys by provider; a provider is missing until we've looked in the Keychain.
+    keys: HashMap<Provider, Option<String>>,
+    /// Models offered by the provider, once loaded.
+    models: Vec<String>,
+    models_rx: Option<Receiver<Result<Vec<String>, String>>>,
+    models_status: Option<Result<String, String>>,
     /// The request in flight, and where its formula would go.
     busy: Option<(u64, JoinHandle<()>, Option<Target>)>,
     next_id: u64,
@@ -106,18 +115,38 @@ impl AiPanel {
             chat: Vec::new(),
             settings: AiSettings::load(),
             key_input: String::new(),
-            key: None,
+            keys: HashMap::new(),
+            models: Vec::new(),
+            models_rx: None,
+            models_status: None,
             busy: None,
             next_id: 0,
             last_sent: None,
         }
     }
 
+    /// The key for the current provider. Local servers work without one
+    /// (an empty key means no `Authorization` header).
     fn key(&mut self) -> Option<String> {
-        if self.key.is_none() {
-            self.key = Some(ai::load_key());
+        let provider = self.settings.provider;
+        let key = self
+            .keys
+            .entry(provider)
+            .or_insert_with(|| ai::load_key(provider))
+            .clone();
+        match key {
+            Some(k) => Some(k),
+            None if !provider.needs_key() => Some(String::new()),
+            None => None,
         }
-        self.key.clone().flatten()
+    }
+
+    fn has_stored_key(&mut self) -> bool {
+        let provider = self.settings.provider;
+        self.keys
+            .entry(provider)
+            .or_insert_with(|| ai::load_key(provider))
+            .is_some()
     }
 
     pub fn is_busy(&self) -> bool {
@@ -134,7 +163,13 @@ impl AiPanel {
     #[cfg(test)]
     pub fn use_test_backend(&mut self, base_url: &str) {
         self.settings.base_url = base_url.to_string();
-        self.key = Some(Some("test-key".into()));
+        self.keys
+            .insert(self.settings.provider, Some("test-key".into()));
+    }
+
+    #[cfg(test)]
+    pub fn settings_mut(&mut self) -> &mut AiSettings {
+        &mut self.settings
     }
 
     /// The last assistant message, for tests.
@@ -353,15 +388,28 @@ impl App {
             out.push_str(&rows_tsv(s, r0, r1 + 1, c0, c1 + 1, true));
         }
 
-        out.push_str("\nSample values per column:\n");
+        // Every distinct value when there are few (so questions like "which
+        // codes are there?" get a complete answer), otherwise a sample.
+        out.push_str("\nValues per column:\n");
         for c in 0..s.n_cols.min(60) {
-            let vals = v.distinct_values(s, c, 12);
-            let vals: Vec<_> = vals.into_iter().filter(|x| !x.is_empty()).take(8).collect();
-            out.push_str(&format!(
-                "{}: {}\n",
-                column_label(s, c, header),
-                vals.join(" | ")
-            ));
+            let vals: Vec<_> = v
+                .distinct_values(s, c, MAX_LISTED_VALUES + 1)
+                .into_iter()
+                .filter(|x| !x.is_empty())
+                .collect();
+            let label = column_label(s, c, header);
+            if vals.len() <= MAX_LISTED_VALUES {
+                out.push_str(&format!(
+                    "{label} (all {} distinct values): {}\n",
+                    vals.len(),
+                    vals.join(" | ")
+                ));
+            } else {
+                out.push_str(&format!(
+                    "{label} (more than {MAX_LISTED_VALUES} distinct values), e.g. {}\n",
+                    vals[..8].join(" | ")
+                ));
+            }
         }
 
         out.push_str("\nRows (row number, then cells):\n");
@@ -680,77 +728,139 @@ impl App {
         ui.add_space(6.0);
     }
 
-    fn ai_settings_ui(&mut self, ui: &mut egui::Ui, has_key: bool) {
+    fn ai_settings_ui(&mut self, ui: &mut egui::Ui, _has_key: bool) {
+        let ctx = ui.ctx().clone();
+        self.poll_models();
         ui.label(RichText::new("Bring your own key").strong());
         ui.label(
             RichText::new(
-                "Works with any OpenAI-compatible API (OpenAI, OpenRouter, Groq, Together, a local \
-                 Ollama or LM Studio server, …). Your key is kept in the macOS Keychain and \
-                 requests go straight from this app to that provider.",
+                "Pick a provider and model. Your key is kept in the macOS Keychain, and requests \
+                 go straight from this app to the provider. Local models (Ollama, LM Studio) \
+                 keep everything on your Mac.",
             )
             .weak()
             .small(),
         );
-        ui.add_space(4.0);
+        ui.add_space(6.0);
+
+        let provider = self.ai.settings.provider;
+        let has_key = self.ai.has_stored_key();
         egui::Grid::new("ai_settings")
             .num_columns(2)
             .spacing([8.0, 6.0])
             .show(ui, |ui| {
+                ui.label("Provider");
+                egui::ComboBox::from_id_salt("ai_provider")
+                    .selected_text(provider.label())
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for p in Provider::ALL {
+                            if ui.selectable_label(p == provider, p.label()).clicked() {
+                                self.ai.settings.set_provider(p);
+                                self.ai.models.clear();
+                                self.ai.models_status = None;
+                                self.ai.key_input.clear();
+                            }
+                        }
+                    });
+                ui.end_row();
+
                 ui.label("Base URL");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.ai.settings.base_url)
+                        .hint_text("https://…/v1")
                         .desired_width(f32::INFINITY),
                 );
                 ui.end_row();
+
+                if self.ai.settings.provider.needs_key() || has_key {
+                    ui.label("API key");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.ai.key_input)
+                            .password(true)
+                            .hint_text(if has_key {
+                                "•••••• (saved)"
+                            } else {
+                                "Paste your key"
+                            })
+                            .desired_width(f32::INFINITY),
+                    );
+                    ui.end_row();
+                }
+
                 ui.label("Model");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.ai.settings.model)
-                        .desired_width(f32::INFINITY),
-                );
-                ui.end_row();
-                ui.label("API key");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.ai.key_input)
-                        .password(true)
-                        .hint_text(if has_key {
-                            "•••••• (saved)"
-                        } else {
-                            "sk-…"
-                        })
-                        .desired_width(f32::INFINITY),
-                );
+                ui.horizontal(|ui| {
+                    let loading = self.ai.models_rx.is_some();
+                    let button = ui
+                        .add_enabled(!loading, egui::Button::new("Load models"))
+                        .on_hover_text("List the models this provider offers");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.ai.settings.model)
+                            .hint_text("model name")
+                            .desired_width(ui.available_width()),
+                    );
+                    if button.clicked() {
+                        self.load_models(&ctx);
+                    }
+                });
                 ui.end_row();
             });
+
+        if !self.ai.models.is_empty() {
+            let current = self.ai.settings.model.clone();
+            egui::ComboBox::from_id_salt("ai_model_list")
+                .selected_text(if self.ai.models.contains(&current) {
+                    current.clone()
+                } else {
+                    format!("Choose from {} models…", self.ai.models.len())
+                })
+                .width(ui.available_width())
+                .height(320.0)
+                .show_ui(ui, |ui| {
+                    for m in &self.ai.models {
+                        if ui.selectable_label(*m == current, m).clicked() {
+                            self.ai.settings.model = m.clone();
+                        }
+                    }
+                });
+        }
+        if self.ai.models_rx.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Loading models…").weak().small());
+            });
+        }
+        match &self.ai.models_status {
+            Some(Ok(msg)) => {
+                ui.label(RichText::new(msg).weak().small());
+            }
+            Some(Err(e)) => {
+                ui.colored_label(ui.visuals().error_fg_color, RichText::new(e).small());
+            }
+            None => {}
+        }
+        if let Some(url) = self.ai.settings.provider.key_url()
+            && !has_key
+        {
+            ui.hyperlink_to(RichText::new("Get an API key ↗").small(), url);
+        }
+
+        ui.add_space(4.0);
+        egui::CollapsingHeader::new("Model options")
+            .id_salt("ai_model_options")
+            .show(ui, |ui| self.ai_model_options(ui));
+
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui.button("Save").clicked() {
-                let mut errors = Vec::new();
-                if let Err(e) = self.ai.settings.save() {
-                    errors.push(format!("Couldn't save settings: {e}"));
-                }
-                let key = self.ai.key_input.trim().to_string();
-                if !key.is_empty() {
-                    match ai::store_key(&key) {
-                        Ok(()) => {
-                            self.ai.key = Some(Some(key));
-                            self.ai.key_input.clear();
-                        }
-                        Err(e) => errors.push(format!("Couldn't store key in Keychain: {e}")),
-                    }
-                }
-                if errors.is_empty() {
-                    self.notify("AI settings saved");
-                    if self.ai.key().is_some() {
-                        self.ai.show_settings = false;
-                    }
-                } else {
-                    self.error(errors.join("; "));
-                }
+                self.save_ai_settings();
             }
             if has_key && ui.button("Remove key").clicked() {
-                match ai::delete_key() {
+                let provider = self.ai.settings.provider;
+                match ai::delete_key(provider) {
                     Ok(()) => {
-                        self.ai.key = Some(None);
-                        self.notify("API key removed from Keychain");
+                        self.ai.keys.insert(provider, None);
+                        self.notify(format!("{} key removed from Keychain", provider.label()));
                     }
                     Err(e) => self.error(format!("Couldn't remove key: {e}")),
                 }
@@ -761,6 +871,173 @@ impl App {
                 );
             }
         });
+    }
+
+    /// Temperature, reply length, reasoning effort and timeout. Every option
+    /// can be left to the model, which is what most models expect.
+    fn ai_model_options(&mut self, ui: &mut egui::Ui) {
+        let s = &mut self.ai.settings;
+        ui.label(
+            RichText::new(
+                "Leave these on the model's defaults unless your model needs something else. \
+                 Options a model rejects are dropped automatically.",
+            )
+            .weak()
+            .small(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("ai_model_options_grid")
+            .num_columns(2)
+            .spacing([8.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Temperature");
+                ui.horizontal(|ui| {
+                    let mut custom = s.temperature.is_some();
+                    if ui.checkbox(&mut custom, "").changed() {
+                        s.temperature = custom.then_some(0.2);
+                    }
+                    match &mut s.temperature {
+                        Some(t) => {
+                            ui.add(egui::Slider::new(t, 0.0..=2.0).step_by(0.1));
+                        }
+                        None => {
+                            ui.label(RichText::new("Model default").weak());
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Lower is more focused and repeatable; higher is more varied.");
+                ui.end_row();
+
+                ui.label("Max reply length");
+                ui.horizontal(|ui| {
+                    let mut custom = s.max_tokens.is_some();
+                    if ui.checkbox(&mut custom, "").changed() {
+                        s.max_tokens = custom.then_some(4096);
+                    }
+                    match &mut s.max_tokens {
+                        Some(n) => {
+                            ui.add(
+                                egui::DragValue::new(n)
+                                    .range(64..=200_000)
+                                    .suffix(" tokens"),
+                            );
+                        }
+                        None => {
+                            ui.label(RichText::new("Provider default").weak());
+                        }
+                    }
+                });
+                ui.end_row();
+
+                ui.label("Reasoning effort");
+                let label = |e: Option<Effort>| match e {
+                    None => "Model default",
+                    Some(Effort::Low) => "Low (faster)",
+                    Some(Effort::Medium) => "Medium",
+                    Some(Effort::High) => "High (slower, smarter)",
+                };
+                egui::ComboBox::from_id_salt("ai_effort")
+                    .selected_text(label(s.reasoning_effort))
+                    .show_ui(ui, |ui| {
+                        for e in [
+                            None,
+                            Some(Effort::Low),
+                            Some(Effort::Medium),
+                            Some(Effort::High),
+                        ] {
+                            ui.selectable_value(&mut s.reasoning_effort, e, label(e));
+                        }
+                    })
+                    .response
+                    .on_hover_text("For reasoning models (e.g. GPT-6, gpt-oss). Others ignore it.");
+                ui.end_row();
+
+                ui.label("Timeout");
+                ui.add(
+                    egui::DragValue::new(&mut s.timeout_secs)
+                        .range(10..=900)
+                        .suffix(" s"),
+                );
+                ui.end_row();
+            });
+        if ui.small_button("Reset to defaults").clicked() {
+            let fresh = AiSettings::for_provider(s.provider);
+            s.temperature = fresh.temperature;
+            s.max_tokens = fresh.max_tokens;
+            s.reasoning_effort = fresh.reasoning_effort;
+            s.timeout_secs = fresh.timeout_secs;
+        }
+    }
+
+    fn save_ai_settings(&mut self) {
+        let mut errors = Vec::new();
+        if self.ai.settings.base_url.trim().is_empty() {
+            errors.push("Enter the provider's base URL".to_string());
+        }
+        if self.ai.settings.model.trim().is_empty() {
+            errors.push("Choose a model (Load models lists them)".to_string());
+        }
+        if let Err(e) = self.ai.settings.save() {
+            errors.push(format!("Couldn't save settings: {e}"));
+        }
+        let provider = self.ai.settings.provider;
+        let key = self.ai.key_input.trim().to_string();
+        if !key.is_empty() {
+            match ai::store_key(provider, &key) {
+                Ok(()) => {
+                    self.ai.keys.insert(provider, Some(key));
+                    self.ai.key_input.clear();
+                }
+                Err(e) => errors.push(format!("Couldn't store key in Keychain: {e}")),
+            }
+        }
+        if errors.is_empty() {
+            self.notify("AI settings saved");
+            if self.ai.key().is_some() {
+                self.ai.show_settings = false;
+            }
+        } else {
+            self.error(errors.join("; "));
+        }
+    }
+
+    fn load_models(&mut self, ctx: &egui::Context) {
+        // A key typed but not saved yet is used for this request.
+        let typed = self.ai.key_input.trim().to_string();
+        let key = if typed.is_empty() {
+            self.ai.key().unwrap_or_default()
+        } else {
+            typed
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (client, settings, ctx) = (self.http.clone(), self.ai.settings.clone(), ctx.clone());
+        self.rt.spawn(async move {
+            let _ = tx.send(ai::list_models(&client, &settings, &key).await);
+            ctx.request_repaint();
+        });
+        self.ai.models_rx = Some(rx);
+        self.ai.models_status = None;
+    }
+
+    fn poll_models(&mut self) {
+        let Some(rx) = &self.ai.models_rx else {
+            return;
+        };
+        let Ok(result) = rx.try_recv() else {
+            return;
+        };
+        self.ai.models_rx = None;
+        match result {
+            Ok(models) => {
+                self.ai.models_status = Some(Ok(format!(
+                    "{} models available. The connection and key work.",
+                    models.len()
+                )));
+                self.ai.models = models;
+            }
+            Err(e) => self.ai.models_status = Some(Err(e)),
+        }
     }
 }
 

@@ -113,3 +113,44 @@ fn ai_errors_can_be_retried() {
     // The failed attempt is replaced, not stacked up.
     assert_eq!(h.state().ai.chat.len(), 2);
 }
+
+#[test]
+fn models_that_reject_temperature_still_work() {
+    let (url, last) = mock_ai_server(|body| {
+        Some(if body.contains("temperature") {
+            "400 Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported.".into()
+        } else {
+            "It lists 8 orders.".into()
+        })
+    });
+    let mut h = harness(SALES_CSV);
+    h.state_mut().ai.use_test_backend(&url);
+    // Temperature is only sent when the user sets one; here they have.
+    h.state_mut().ai.settings_mut().temperature = Some(0.2);
+    h.state_mut().ai.open = true;
+    send(&mut h, "Summarize this sheet.");
+    let reply = h.state().ai.last_reply().unwrap();
+    assert!(!reply.error, "{}", reply.text);
+    assert_eq!(reply.text, "It lists 8 orders.");
+    assert!(!last.lock().unwrap().contains("temperature"));
+}
+
+#[test]
+fn ai_settings_screen() {
+    let (url, _) = mock_ai_server(|_| Some("ok".into()));
+    let mut h = harness(SALES_CSV);
+    h.state_mut().ai.use_test_backend(&url);
+    h.state_mut().ai.open = true;
+    h.state_mut().ai.show_settings = true;
+    h.run_steps(2);
+    h.get_by_label("Model options").click();
+    h.run_steps(2);
+    h.get_by_label("Reasoning effort");
+    shot(&mut h, "ai-settings");
+    // Defaults send no optional parameters.
+    let s = h.state_mut().ai.settings_mut().clone();
+    assert_eq!(
+        (s.temperature, s.max_tokens, s.reasoning_effort),
+        (None, None, None)
+    );
+}

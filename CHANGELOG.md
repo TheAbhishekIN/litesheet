@@ -4,6 +4,18 @@ All notable changes to LiteSheet are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- AI provider presets for OpenAI, Anthropic (Claude), OpenRouter, Groq, Ollama and LM Studio, each with its base URL and a current default model (`gpt-6-luna` for OpenAI), plus any OpenAI-compatible API. Each provider keeps its own key in the Keychain
+- **Load models** lists the models your provider offers and checks the key
+- Model options: temperature, max reply length, reasoning effort and timeout
+
+### Fixed
+
+- The AI chat failed with "temperature does not support 0.2" on models that only accept their default temperature. LiteSheet now sends no temperature unless you set one, and if a model rejects any option it drops that option and retries
+- The AI now sees every distinct value of columns with up to 50 of them, so questions like "what are the unique codes?" get a complete answer
+- Clearer errors for a bad key, an unknown model, rate limits and timeouts
+
 ## [0.3.0] - 2026-10-14
 
 ### Added

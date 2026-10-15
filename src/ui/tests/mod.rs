@@ -120,7 +120,8 @@ pub fn wait_for_ai(h: &mut Harness<'_, App>) {
 }
 
 /// A fake OpenAI-compatible endpoint on localhost. `reply` maps each request
-/// body to the assistant's message (or `None` for a 401). The last request
+/// body to the assistant's message (or `None` for a 401; a reply starting
+/// with `400 ` is sent as a 400 error with the rest as its message). The last request
 /// body is recorded so tests can check what was sent.
 pub fn mock_ai_server(
     reply: impl Fn(&str) -> Option<String> + Send + 'static,
@@ -158,6 +159,10 @@ pub fn mock_ai_server(
                 .then(|| reply(&body))
                 .flatten();
             let (status, json) = match content {
+                Some(c) if c.starts_with("400 ") => (
+                    "400 Bad Request",
+                    serde_json::json!({"error": {"message": &c[4..]}}),
+                ),
                 Some(c) => (
                     "200 OK",
                     serde_json::json!({"choices": [{"message": {"role": "assistant", "content": c}}]}),

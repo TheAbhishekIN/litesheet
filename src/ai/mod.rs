@@ -9,9 +9,9 @@ use serde::Deserialize;
 
 use crate::model::filter::Condition;
 
-pub use client::spawn;
+pub use client::{list_models, spawn};
 pub use keychain::{delete_key, load_key, store_key};
-pub use settings::AiSettings;
+pub use settings::{AiSettings, Effort, Provider};
 
 /// Shortcuts in the AI menu and the chat's empty state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

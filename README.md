@@ -196,13 +196,14 @@ Try it on the bundled `samples/sales.xlsx`: a styled order list with a frozen he
 
 ## AI (Bring Your Own Key)
 
-Open the AI panel with **AI** on the toolbar (or **⇧⌘I**). The first time, add your provider in **⚙ Settings**:
+Open the AI panel with **AI** on the toolbar (or **⇧⌘I**). The first time, set up your provider in **⚙ Settings**:
 
-| Setting | Example |
+| Setting | What it does |
 |---|---|
-| Base URL | `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, `https://api.groq.com/openai/v1`, `http://localhost:11434/v1` (Ollama) |
-| Model | `gpt-4o-mini`, or any model your provider serves |
-| API key | Saved to the macOS Keychain under the service `LiteSheet` |
+| Provider | OpenAI, Anthropic (Claude), OpenRouter, Groq, Ollama, LM Studio, or any other OpenAI-compatible API. Each comes with its base URL and a current default model, such as `gpt-6-luna` for OpenAI or `claude-haiku-5-5` for Anthropic |
+| API key | Saved to the macOS Keychain, one per provider. Local servers (Ollama, LM Studio) don't need one |
+| Model | Type a name, or click **Load models** to pick from what your provider offers (this also checks that the key works) |
+| Model options | Temperature, max reply length, reasoning effort and timeout. All are off by default, so each model uses its own defaults. If a model rejects an option, LiteSheet drops it and retries |
 
 Then chat. **Return** sends and **Shift+Return** adds a new line. Use **Stop** to cancel a request and **New chat** to start over. An empty chat offers quick starts: summarize the sheet, explain the selection, write a formula, or filter rows.
 
@@ -224,7 +225,7 @@ Below the message box, the panel shows how much was sent and to which host.
 - Updates are only installed if they are signed by the LiteSheet developer's Apple Developer ID.
 - AI requests go directly from your Mac to the base URL you configure. Point it at a local model and nothing leaves your machine.
 - The API key is stored in the macOS Keychain, never in a plain-text file.
-- Settings (base URL and model) are stored in `~/Library/Application Support/LiteSheet/settings.json`.
+- Settings (provider, base URL, model and model options) are stored in `~/Library/Application Support/LiteSheet/settings.json`.
 
 ## Performance
 
