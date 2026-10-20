@@ -14,8 +14,8 @@ exclude = ["docs/screenshots/*", "dist/*"]
 
 [dependencies]
 # UI
-eframe = "0.36.2"
-egui = "0.36.2"
+eframe = "0.37.0"
+egui = "0.37.0"
 rfd = "0.17.2"
 
 # Spreadsheet engine and file formats
@@ -45,7 +45,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
 
 [dev-dependencies]
-egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
+egui_kittest = { version = "0.37.0", features = ["eframe", "wgpu", "snapshot"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 [profile.release]
